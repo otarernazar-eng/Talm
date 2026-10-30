@@ -149,7 +149,7 @@ class TritonChunkedCEFunction(torch.autograd.Function):
 
         max_rows = B * min(S, chunk_size)
         logits_buf = torch.empty((max_rows, V), dtype=compute_dtype, device=device)
-        block_v = 2048 if V >= 2048 else triton.next_power_of_2(max(V, 16))
+        block_v = 4096 if V >= 4096 else triton.next_power_of_2(max(V, 16))
 
         for start in range(0, S, chunk_size):
             stop = min(start + chunk_size, S)
