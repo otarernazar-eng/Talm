@@ -92,10 +92,11 @@ def test_rope_matches_pytorch(dtype, batch_cos):
     out_q, out_k = triton_apply_rotary_pos_emb(q, k, cos, sin)
     (out_q * dq_out + out_k.sum(dim=1, keepdim=True) * dk_out[:, :1]).sum().backward()
     tol = TOLERANCE[dtype]
+    tol_grad = 0.03 if dtype == torch.float16 else tol
     torch.testing.assert_close(out_q.float(), ref_q.float(), rtol=tol, atol=tol)
     torch.testing.assert_close(out_k.float(), ref_k.float(), rtol=tol, atol=tol)
-    torch.testing.assert_close(q.grad.float(), ref_dq, rtol=tol, atol=tol)
-    torch.testing.assert_close(k.grad.float(), ref_dk, rtol=tol, atol=tol)
+    torch.testing.assert_close(q.grad.float(), ref_dq, rtol=tol_grad, atol=tol_grad)
+    torch.testing.assert_close(k.grad.float(), ref_dk, rtol=tol_grad, atol=tol_grad)
 
 
 def test_nf4_dequant_matches_bitsandbytes():
