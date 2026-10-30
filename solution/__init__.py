@@ -31,6 +31,13 @@ from solution.swiglu import patch_qwen2_mlp
 
 
 def apply() -> None:
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
+
     patch_qwen2_rmsnorm()
     patch_qwen2_rope()
     patch_bnb_and_lora_linear4bit()

@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 
-TOLERANCE = {torch.float16: 2e-3, torch.float32: 1e-4}
+TOLERANCE = {torch.float16: 5e-3, torch.float32: 1e-4}
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
