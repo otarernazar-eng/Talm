@@ -27,7 +27,7 @@ import triton
 import triton.language as tl
 
 IGNORE_INDEX = -100
-DEFAULT_CHUNK_SIZE = 64
+DEFAULT_CHUNK_SIZE = 128
 
 _CE_TLS = threading.local()
 
