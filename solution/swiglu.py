@@ -270,27 +270,21 @@ class TritonFusedMLPFunction(torch.autograd.Function):
             ctx.gate_proj.weight, ctx.gate_proj.weight.quant_state, dtype=compute_dtype
         )
         gate = F.linear(x_2d, w_gate)
-        del w_gate
 
         w_up = triton_dequantize_nf4(
             ctx.up_proj.weight, ctx.up_proj.weight.quant_state, dtype=compute_dtype
         )
         up = F.linear(x_2d, w_up)
-        del w_up
 
         # Compute d_gate and d_up in-place into `gate` and `up`, then free `d_act`
         launch_swiglu_bwd(d_act, gate, up, d_gate=gate, d_up=up)
         del d_act
 
-        w_gate = triton_dequantize_nf4(
-            ctx.gate_proj.weight, ctx.gate_proj.weight.quant_state, dtype=compute_dtype
-        )
+        # Reuse w_gate directly without re-dequantizing
         dx_2d = torch.matmul(gate, w_gate)
         del w_gate, gate
 
-        w_up = triton_dequantize_nf4(
-            ctx.up_proj.weight, ctx.up_proj.weight.quant_state, dtype=compute_dtype
-        )
+        # Reuse w_up directly without re-dequantizing
         dx_2d.addmm_(up, w_up)
         del w_up, up
 
@@ -310,6 +304,8 @@ def patch_qwen2_mlp() -> None:
     def mlp_forward(self, x: torch.Tensor) -> torch.Tensor:
         if not x.is_cuda or getattr(self.config, "hidden_act", "silu") != "silu":
             return orig_forward(self, x)
+        if _can_use_fused_4bit_mlp(self):
+            return TritonFusedMLPFunction.apply(x, self.gate_proj, self.up_proj, self.down_proj)
         return self.down_proj(triton_swiglu(self.gate_proj(x), self.up_proj(x)))
 
     mlp_forward._soup_triton_swiglu = True
