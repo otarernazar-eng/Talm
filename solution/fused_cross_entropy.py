@@ -279,6 +279,59 @@ def patch_fused_cross_entropy() -> None:
     from transformers.modeling_outputs import CausalLMOutputWithPast
     from transformers.models.qwen2 import modeling_qwen2
 
+    orig_model_forward = modeling_qwen2.Qwen2Model.forward
+    if not getattr(orig_model_forward, "_soup_unpad", False):
+
+        def qwen2_model_unpad_forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            position_ids=None,
+            past_key_values=None,
+            inputs_embeds=None,
+            use_cache=None,
+            **kwargs,
+        ):
+            orig_s = input_ids.shape[1] if (input_ids is not None and input_ids.ndim == 2) else None
+            trimmed = False
+            if (
+                self.training
+                and input_ids is not None
+                and attention_mask is not None
+                and input_ids.ndim == 2
+                and attention_mask.ndim == 2
+                and orig_s is not None
+                and orig_s > 32
+            ):
+                active = attention_mask != 0
+                if active.any():
+                    max_col = active.nonzero()[:, 1].max().item()
+                    needed = min(orig_s, max_col + 1)
+                    cand_len = min(orig_s, ((needed + 15) // 16) * 16)
+                    if cand_len < orig_s:
+                        trimmed = True
+                        input_ids = input_ids[:, :cand_len]
+                        attention_mask = attention_mask[:, :cand_len]
+                        if position_ids is not None and position_ids.ndim == 2:
+                            position_ids = position_ids[:, :cand_len]
+
+            out = orig_model_forward(
+                self,
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                use_cache=use_cache,
+                **kwargs,
+            )
+            if trimmed and hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
+                out.last_hidden_state._soup_orig_s = orig_s
+            return out
+
+        qwen2_model_unpad_forward._soup_unpad = True
+        modeling_qwen2.Qwen2Model.forward = qwen2_model_unpad_forward
+
     orig_qwen_forward = modeling_qwen2.Qwen2ForCausalLM.forward
     if not getattr(orig_qwen_forward, "_soup_triton_ce", False):
 
@@ -420,15 +473,28 @@ def patch_fused_cross_entropy() -> None:
                 if head_w is None and hasattr(head, "__self__"):
                     head_w = getattr(head.__self__, "weight", None)
                 if torch.is_tensor(head_w) and head_w.is_cuda:
-                    return triton_chunked_causal_lm_loss(
+                    orig_s = getattr(hidden, "_soup_orig_s", None)
+                    labels_for_loss = labels
+                    if orig_s is not None and torch.is_tensor(labels) and labels.shape[1] > hidden.shape[1]:
+                        labels_for_loss = labels[:, : hidden.shape[1]]
+                    loss, step = triton_chunked_causal_lm_loss(
                         hidden,
                         head,
-                        labels,
+                        labels_for_loss,
                         chunk=chunk,
                         num_items_in_batch=num_items_in_batch,
                         shift_labels=shift_labels,
                         ignore_index=ignore_index,
                     )
+                    if orig_s is not None and orig_s > hidden.shape[1]:
+                        pad_len = orig_s - hidden.shape[1]
+                        step = ChunkedStep(
+                            token_entropy=torch.nn.functional.pad(step.token_entropy, (0, pad_len), value=0.0),
+                            token_loss=torch.nn.functional.pad(step.token_loss, (0, pad_len), value=0.0),
+                            correct=torch.nn.functional.pad(step.correct, (0, pad_len), value=0.0),
+                            labelled=step.labelled,
+                        )
+                    return loss, step
             return orig_chunked_loss_fn(
                 hidden,
                 head,
