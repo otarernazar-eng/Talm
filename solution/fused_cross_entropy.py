@@ -339,7 +339,7 @@ def patch_fused_cross_entropy() -> None:
                 if active_mask.any():
                     max_active_col = active_mask.nonzero()[:, 1].max().item()
                     needed_len = min(orig_seq_len, max_active_col + 1)
-                    cand_len = min(orig_seq_len, ((needed_len + 15) // 16) * 16)
+                    cand_len = min(orig_seq_len, ((needed_len + 63) // 64) * 64)
                     if cand_len < orig_seq_len:
                         trimmed = True
                         trimmed_len = cand_len
