@@ -304,6 +304,8 @@ def patch_qwen2_mlp() -> None:
     def mlp_forward(self, x: torch.Tensor) -> torch.Tensor:
         if not x.is_cuda or getattr(self.config, "hidden_act", "silu") != "silu":
             return orig_mlp_forward(self, x)
+        if _can_use_fused_4bit_mlp(self):
+            return TritonFusedMLPFunction.apply(x, self.gate_proj, self.up_proj, self.down_proj)
         return self.down_proj(triton_swiglu(self.gate_proj(x), self.up_proj(x)))
 
     mlp_forward._soup_triton_swiglu = True
