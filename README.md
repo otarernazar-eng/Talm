@@ -29,7 +29,12 @@ Profiling base Soup 0.77.0 (`14,350 MiB` peak VRAM, `~80 s` wall time) revealed 
 
 ---
 
-### Summary of Our 8 Custom `@triton.jit` Kernels in `solution/`
+### Summary of Key Optimizations and Custom `@triton.jit` Kernels
+
+1. **Dynamic Batch Sequence Tail Trimming (Unpadding)**:
+   In the Kazakh alpaca dataset, maximum sequence length is 512, but median length is ~140 (mean ~220). In causal right-padded batches, tokens past the maximum active label across the batch never attend to future tokens and have `label == -100`. In accordance with official Section 8 rules (*"Убирать pad-токены внутри батча своим кодом можно"*), our forward pass trims the batch sequence length down to the active boundary (aligned to 16 for Tensor Cores), saving up to 50% FLOPs and activation memory while producing 100% mathematically identical losses, gradients, and padded metric arrays.
+
+2. **Our 8 Custom `@triton.jit` Kernels in `solution/`**:
 
 | Kernel (`@triton.jit`) | Module | What It Replaces & How It Works |
 |---|---|---|

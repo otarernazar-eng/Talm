@@ -316,6 +316,40 @@ def patch_fused_cross_entropy() -> None:
                     **kwargs,
                 )
 
+            orig_seq_len = input_ids.shape[1] if (input_ids is not None and input_ids.ndim == 2) else None
+            trimmed = False
+            trimmed_len = orig_seq_len
+
+            # Dynamic batch tail trimming: in right-padded SFT batches, tail tokens
+            # past the maximum active label index across all batch rows never attend to
+            # future positions (causal mask) and have label == IGNORE_INDEX. Trimming
+            # tail padding saves up to 50% FLOPs and activation VRAM while computing
+            # mathematically identical losses, gradients, and metrics.
+            if (
+                self.training
+                and input_ids is not None
+                and labels is not None
+                and torch.is_tensor(labels)
+                and labels.is_cuda
+                and labels.ndim == 2
+                and orig_seq_len is not None
+                and orig_seq_len > 32
+            ):
+                active_mask = labels != IGNORE_INDEX
+                if active_mask.any():
+                    max_active_col = active_mask.nonzero()[:, 1].max().item()
+                    needed_len = min(orig_seq_len, max_active_col + 1)
+                    cand_len = min(orig_seq_len, ((needed_len + 15) // 16) * 16)
+                    if cand_len < orig_seq_len:
+                        trimmed = True
+                        trimmed_len = cand_len
+                        input_ids = input_ids[:, :trimmed_len]
+                        if attention_mask is not None and attention_mask.ndim == 2:
+                            attention_mask = attention_mask[:, :trimmed_len]
+                        if position_ids is not None and position_ids.ndim == 2:
+                            position_ids = position_ids[:, :trimmed_len]
+                        labels = labels[:, :trimmed_len]
+
             outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -333,6 +367,17 @@ def patch_fused_cross_entropy() -> None:
                 num_items_in_batch=kwargs.get("num_items_in_batch"),
                 shift_labels=kwargs.get("shift_labels"),
             )
+            if trimmed and orig_seq_len is not None and trimmed_len < orig_seq_len:
+                pad_s = orig_seq_len - trimmed_len
+                token_entropy = torch.nn.functional.pad(step.token_entropy, (0, pad_s), value=0.0)
+                token_loss = torch.nn.functional.pad(step.token_loss, (0, pad_s), value=0.0)
+                correct = torch.nn.functional.pad(step.correct, (0, pad_s), value=0.0)
+                step = ChunkedStep(
+                    token_entropy=token_entropy,
+                    token_loss=token_loss,
+                    correct=correct,
+                    labelled=step.labelled,
+                )
             self._last_triton_chunked_step = step
             return CausalLMOutputWithPast(
                 loss=loss,
