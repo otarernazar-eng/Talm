@@ -27,9 +27,6 @@ import triton
 import triton.language as tl
 from torch.utils.checkpoint import checkpoint
 
-from solution.rmsnorm import fused_rmsnorm
-from solution.swiglu import fused_swiglu
-
 IGNORE_INDEX = -100
 _COMPUTE_DTYPE = torch.float16
 
