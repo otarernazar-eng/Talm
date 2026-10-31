@@ -28,6 +28,7 @@ from solution.nf4_linear import patch_bnb_and_lora_linear4bit
 from solution.rmsnorm import patch_qwen2_rmsnorm
 from solution.rope import patch_qwen2_rope
 from solution.swiglu import patch_qwen2_mlp
+from solution.unpad import patch_unpadded_engine
 
 
 def apply() -> None:
@@ -43,3 +44,4 @@ def apply() -> None:
     patch_bnb_and_lora_linear4bit()
     patch_qwen2_mlp()
     patch_fused_cross_entropy()
+    patch_unpadded_engine()
