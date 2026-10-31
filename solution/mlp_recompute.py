@@ -20,7 +20,7 @@ import torch
 
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
-from .swiglu import swiglu  # the organizers' example activation kernel (does not count as ours)
+from .swiglu import swiglu                                                                      
 
 
 def _weight16(linear):
@@ -50,7 +50,7 @@ class MLPRecompute(torch.autograd.Function):
         with torch.enable_grad():
             x_ = x.detach().requires_grad_(True)
             act = swiglu(mlp.gate_proj(x_), mlp.up_proj(x_))
-        # d act = grad_out @ W_down (down_proj is frozen: its weight needs no gradient)
+                                                                                       
         grad_act = torch.mm(grad_out.reshape(-1, grad_out.shape[-1]).to(torch.float16),
                             _weight16(mlp.down_proj)).view(act.shape).to(act.dtype)
         (grad_x,) = torch.autograd.grad(act, x_, grad_act)
@@ -78,12 +78,12 @@ def patch_qwen2_mlp_recompute():
         return
 
     def forward(self, x):
-        # (opt-in; graceful degradation of the forward only, state.py: the backward recomputes
-        # through the guarded forwards of the example's SwiGLU and the layer groups)
+                                                                                              
+                                                                                    
         if "mlp_recompute" not in DISABLED and _recompute_applies(self, x):
             try:
                 y = MLPRecompute.apply(x, self)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("mlp_recompute", exc):
                     raise
             else:

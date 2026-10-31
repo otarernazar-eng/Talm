@@ -45,7 +45,7 @@ import triton
 from .state import DISABLED, fallback
 from .swiglu import BLOCK, example_swiglu_bwd_kernel, example_swiglu_fwd_kernel
 
-GATE, UP = 4, 5  # positions of mlp.gate_proj and mlp.up_proj in qgroup.PROJECTIONS
+GATE, UP = 4, 5                                                                    
 
 
 class SwiGLUSaveUp(torch.autograd.Function):
@@ -54,12 +54,12 @@ class SwiGLUSaveUp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, group):
         weight = group.weight("fwd", GATE)
-        gate = F.linear(x, weight, group.biases[GATE])  # as GroupLinear.forward computes it
-        del weight  # a per-projection slice on the last layer: freed before the next one
+        gate = F.linear(x, weight, group.biases[GATE])                                      
+        del weight                                                                       
         up = F.linear(x, group.weight("fwd", UP), group.biases[UP])
         n = gate.numel()
-        # the example's forward kernel, the activation written over gate (each element is read
-        # before it is overwritten, at the same offset)
+                                                                                              
+                                                       
         example_swiglu_fwd_kernel[(triton.cdiv(n, BLOCK),)](gate, up, gate, n, BLOCK=BLOCK)
         ctx.group = group
         ctx.save_for_backward(x, up)
@@ -70,16 +70,16 @@ class SwiGLUSaveUp(torch.autograd.Function):
         x, up = ctx.saved_tensors
         group = ctx.group
         weight = group.weight("bwd", GATE)
-        gate = F.linear(x, weight, group.biases[GATE])  # the forward's gate, bit for bit
+        gate = F.linear(x, weight, group.biases[GATE])                                   
         grad = grad.to(gate.dtype).contiguous()
         n = gate.numel()
-        # swiglu_inplace.py: dgate over gate, dup over up
+                                                         
         example_swiglu_bwd_kernel[(triton.cdiv(n, BLOCK),)](grad, gate, up, gate, up, n,
                                                            BLOCK=BLOCK)
         del grad
-        dx = torch.matmul(gate, weight)  # GroupLinear.backward of gate_proj
+        dx = torch.matmul(gate, weight)                                     
         del gate, weight
-        dx += torch.matmul(up, group.weight("bwd", UP))  # ... of up_proj, added as autograd did
+        dx += torch.matmul(up, group.weight("bwd", UP))                                         
         return dx, None
 
 
@@ -119,17 +119,17 @@ def patch_qwen2_mlp_save_up():
         return
 
     def forward(self, x):
-        # (opt-in; graceful degradation of the forward only, state.py: the layer group's
-        # weights fall back by themselves, forward and backward)
+                                                                                        
+                                                                
         group = None if "mlp_save_up" in DISABLED else save_up_group(self, x)
         if group is not None:
             try:
                 act = SwiGLUSaveUp.apply(x, group)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("mlp_save_up", exc):
                     raise
             else:
-                group.expected_bwd += 2  # the backward asks the group for W_gate and W_up
+                group.expected_bwd += 2                                                   
                 RAN["mlp_save_up"] += 1
                 return self.down_proj(act)
         FELL_BACK["mlp_save_up"] += 1

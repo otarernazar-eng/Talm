@@ -69,12 +69,12 @@ STEPS = 4
 BATCH = 4
 SEED = 1
 VOCAB = 1000
-WORKER_TIMEOUT = 1500  # about 40 s on an idle RTX 4080; other jobs on the GPU slow it down
+WORKER_TIMEOUT = 1500                                                                      
 
 BASE_ENV = {
-    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",  # deterministic cuBLAS (use_deterministic_algorithms)
-    "SOLUTION_VARLEN": "1",                # the T4's single-launch attention on this GPU too
-    "SOLUTION_HEAD_VCHUNK": "384",         # several vocabulary slices, the last one partial
+    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",                                                       
+    "SOLUTION_VARLEN": "1",                                                                  
+    "SOLUTION_HEAD_VCHUNK": "384",                                                          
     "PYTHONHASHSEED": "0",
     "TOKENIZERS_PARALLELISM": "false",
     "HF_HUB_OFFLINE": "1",
@@ -85,19 +85,19 @@ BASE_ENV = {
     "HF_DATASETS_DISABLE_PROGRESS_BARS": "1",
     "TRANSFORMERS_VERBOSITY": "error",
 }
-# The in-process runs: start-up patches (tested by the other two processes) and the warm-up
-# thread act outside the training step and are left out here.
+                                                                                           
+                                                             
 MAIN_ENV = {"SOLUTION_DISABLE_STARTUP": "1", "SOLUTION_WARMUP_THREAD": "0"}
 WORKERS = {
-    "main": MAIN_ENV,                               # the baseline and the core switches
-    "more": MAIN_ENV,                               # the other switches (in parallel)
-    "startup": {},                                  # apply() first, every default (the harness)
-    "control": {"SOLUTION_DISABLE_STARTUP": "1"},   # the same without the start-up patches
+    "main": MAIN_ENV,                                                                   
+    "more": MAIN_ENV,                                                                 
+    "startup": {},                                                                              
+    "control": {"SOLUTION_DISABLE_STARTUP": "1"},                                          
 }
 
-# Runs with the solution: worker -> {name: switches on top of the defaults}. Each switching
-# worker trains the default solution ("full") first, the reference of its other runs. Names
-# ending in "_p0" train with LoRA dropout 0 (see test_fp16_norm_output_path).
+                                                                                           
+                                                                                           
+                                                                             
 CONFIGS = {
     "main": {
         "full": {},
@@ -132,7 +132,7 @@ CONFIGS = {
         "mlp_recompute": {"SOLUTION_MLP_RECOMPUTE": "1"},
     },
 }
-SHARED = ("full", "no_fused_qkv")  # trained by every switching worker: references
+SHARED = ("full", "no_fused_qkv")                                                 
 WORKER_OF = {name: worker for worker, runs in CONFIGS.items() for name in runs
              if name not in SHARED}
 
@@ -150,12 +150,12 @@ def _pair(runs, name, reference="full"):
     return runs[_key(reference, worker)], runs[_key(name, worker)]
 
 
-# Claimed bit-identical: (component, run with it switched off, the run it is compared with,
-# counter that must be > 0 in the reference and 0 in that run, where the claim is made; a counter
-# "-name": an opt-in that must run in that run only). Everything compared must be equal. The
-# fused q|k|v projection (on by default, not bit-identical: fused_proj.py) needs the packed group
-# and the LoRA node and leaves the split passes alone, so the switches that take those away are
-# compared with the default solution without it ("no_fused_qkv").
+                                                                                           
+                                                                                                 
+                                                                                            
+                                                                                                 
+                                                                                               
+                                                                 
 BIT_IDENTICAL = [
     ("LoRA node vs PEFT's LoRA forward", "no_lora_node", "no_fused_qkv", "lora_node", "lora.py"),
     ("LoRA fp16 copies once per step vs a cast per forward", "no_lora_cast", "full",
@@ -188,11 +188,11 @@ BIT_IDENTICAL = [
 ]
 
 
-# --------------------------------------------------------------------------------------------
-# The worker: runs in a child process (python -m solution.test_parity <mode> <out_dir>).
-# Nothing of transformers / PEFT / TRL is imported at module level: the "startup" worker calls
-# solution.apply() before them, as the harness does.
-# --------------------------------------------------------------------------------------------
+                                                                                              
+                                                                                        
+                                                                                              
+                                                    
+                                                                                              
 
 _MISSING = object()
 _T0 = time.perf_counter()
@@ -202,7 +202,7 @@ def _log(what):
     print(f"[parity] {time.perf_counter() - _T0:7.2f} s  {what}", flush=True)
 
 
-# Everything solution.apply() replaces: (module, class or None, attribute).
+                                                                           
 PATCHED = (
     ("transformers.models.qwen2.modeling_qwen2", "Qwen2MLP", "forward"),
     ("transformers.models.qwen2.modeling_qwen2", "Qwen2RMSNorm", "forward"),
@@ -296,10 +296,10 @@ def _set_flags():
     for (module, name), value in _flags().items():
         setattr(importlib.import_module(f"solution.{module}"), name, value)
     patches._unpad.update(enabled=os.environ.get("SOLUTION_DISABLE_UNPAD") != "1", checked=0)
-    patches._host.update(defer=False, bookkeeping=False)  # apply() switches them on
+    patches._host.update(defer=False, bookkeeping=False)                            
     patches._pending_step.clear()
     patches._first_forward[:] = [True]
-    rmsnorm.LAYER_FORWARDS.clear()  # filled again by patch_qwen2_add_norm when it is on
+    rmsnorm.LAYER_FORWARDS.clear()                                                      
 
 
 def _check_flags_match_modules():
@@ -354,7 +354,7 @@ def _make_checkpoint(path):
         for name, param in model.named_parameters():
             if name.endswith("norm.weight"):
                 param.copy_(0.8 + 0.4 * torch.rand(param.shape, generator=gen))
-            elif name.endswith("embed_tokens.weight"):  # step 0: loss 5.3, entropy 6.5, acc 0.45
+            elif name.endswith("embed_tokens.weight"):                                           
                 param.copy_(torch.randn(param.shape, generator=gen) * 0.04)
             else:
                 param.copy_(torch.randn(param.shape, generator=gen) * 0.02)
@@ -474,7 +474,7 @@ def _group_dequant_exact(model):
                 ref = bnbf.dequantize_4bit(module.weight.data, module.weight.quant_state)
                 ours = full[group.elem_bounds[idx]:group.elem_bounds[idx + 1]].view(ref.shape)
                 differing += int((ours != ref.to(torch.float16)).sum())
-                one = group.dequantize_one(idx)  # the split path's launch
+                one = group.dequantize_one(idx)                           
                 differing += int((one != ref.to(torch.float16)).sum())
     return differing
 
@@ -546,21 +546,21 @@ def _train(ckpt, rows, solution_on, dropout=0.05):
         trainer = SFTTrainer(model=model, args=args, train_dataset=Dataset.from_list(rows),
                              **{tok_arg: _tokenizer()})
         _log("trainer built")
-        # TRL casts a quantized model's trainable weights to bf16; for fp16 training Soup casts
-        # the LoRA weights back to fp32 before the optimizer exists
-        # (soup_cli.utils.mixed_precision.align_trainable_dtype_for_fp16): the same here.
+                                                                                               
+                                                                   
+                                                                                         
         gen = torch.Generator(device="cuda").manual_seed(SEED + 1)
         with torch.no_grad():
             for name, param in model.named_parameters():
                 if param.requires_grad and "lora_" in name and param.dtype == torch.bfloat16:
                     param.data = param.data.to(torch.float32)
-                if "lora_B" in name:  # non-zero from the start: step 0 runs the whole adapter
+                if "lora_B" in name:                                                          
                     param.copy_(torch.randn(param.shape, generator=gen, device=param.device)
                                 * 0.02)
         recorder_trainer = [trainer]
         recorder = Recorder()
         trainer.add_callback(recorder)
-        # the exact fp32 loss of every step (older transformers log it rounded to 4 digits)
+                                                                                           
         losses, training_step = [], trainer.training_step
 
         def recorded_step(*args, **kwargs):
@@ -615,7 +615,7 @@ def _train(ckpt, rows, solution_on, dropout=0.05):
 
 def _worker(mode, out_dir):
     out = Path(out_dir)
-    # one GPU: with several visible the Trainer would wrap the model in DataParallel
+                                                                                    
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
     torch.use_deterministic_algorithms(True)
     torch.backends.cudnn.benchmark = False
@@ -624,7 +624,7 @@ def _worker(mode, out_dir):
     import solution
 
     if mode not in CONFIGS:
-        solution.apply()  # first, before transformers / PEFT / TRL are imported (the harness)
+        solution.apply()                                                                      
     rows = _rows()
     ckpt = _make_checkpoint(out / f"checkpoint_{mode}")
     _log("checkpoint written")
@@ -657,9 +657,9 @@ def _worker(mode, out_dir):
     torch.save(results, out / f"{mode}.pt")
 
 
-# --------------------------------------------------------------------------------------------
-# The tests (in the pytest process): start the workers, compare their results.
-# --------------------------------------------------------------------------------------------
+                                                                                              
+                                                                              
+                                                                                              
 
 def _worker_slots():
     """How many workers run at once: one per CPU and per 3 GiB of available memory (each holds
@@ -691,11 +691,11 @@ def runs(tmp_path_factory):
     out = tmp_path_factory.mktemp("parity")
     env = {k: v for k, v in os.environ.items() if not k.startswith("SOLUTION_")}
     env.update(BASE_ENV)
-    # the parent's GPU only: on a machine with several (Kaggle's have two T4s) the Trainer of a
-    # worker would otherwise wrap the model in DataParallel
+                                                                                               
+                                                           
     env.setdefault("CUDA_VISIBLE_DEVICES", str(torch.cuda.current_device()))
     gc.collect()
-    torch.cuda.empty_cache()  # what earlier tests left cached in this process, for the workers
+    torch.cuda.empty_cache()                                                                   
     pending, running, failed = list(WORKERS), {}, []
     slots = _worker_slots()
     while pending or running:
@@ -786,7 +786,7 @@ def test_harness_reproduces_itself(runs):
     comparisons below measure the code, not noise."""
     assert not _differences(runs["baseline"], runs["baseline_again"])
     assert not _differences(runs["full"], runs["full_again"])
-    assert not _differences(runs["full"], runs["more:full"])  # another process: the same too
+    assert not _differences(runs["full"], runs["more:full"])                                 
     start = runs["baseline"]["adapter0"]
     for name, run in runs.items():
         assert run["lora_dtypes"] == ["torch.float32"], name
@@ -815,7 +815,7 @@ def test_bit_identical_component(runs, component, config, reference, counter, wh
     """Claimed bit-identical (see `where`): with the component switched off every logged value,
     the step-0 LoRA gradients, the trained adapter and the head's hidden gradient are equal."""
     full, run = _pair(runs, config, reference)
-    if counter is not None and counter.startswith("-"):  # an opt-in: runs in `config` only
+    if counter is not None and counter.startswith("-"):                                    
         assert full["counts"].get(counter[1:], 0) == 0, f"{counter[1:]} ran by default"
         assert run["counts"].get(counter[1:], 0) > 0, f"{counter[1:]} did not run"
     elif counter is not None:
@@ -839,10 +839,10 @@ def test_varlen_attention_vs_rows_attention(runs):
     assert full["counts"].get("varlen_attention", 0) > 0
     assert rows["counts"].get("varlen_attention", 0) == 0
     assert rows["counts"].get("rows_attention", 0) > 0
-    # the step-0 forward: loss and TRL's metrics
+                                                
     for key in ("loss", "entropy", "mean_token_accuracy", "num_tokens"):
         assert full[key][0] == rows[key][0], key
-    # with deterministic algorithms the backward kernel is deterministic: everything equal
+                                                                                          
     assert not _differences(full, rows)
 
 
@@ -883,7 +883,7 @@ def test_head_compaction(runs):
     are reported together when one is over)."""
     full, ref = _pair(runs, "no_head_compact")
     for key in ("loss", "entropy", "mean_token_accuracy", "num_tokens"):
-        assert full[key][0] == ref[key][0], key  # step 0: the same forward
+        assert full[key][0] == ref[key][0], key                            
     dh, dh_ref = full["dh0"], ref["dh0"]
     assert dh.dtype == dh_ref.dtype == torch.float16 and dh.shape == dh_ref.shape
     ulps = _ulps16(dh, dh_ref)
@@ -912,7 +912,7 @@ def test_head_rows_sum_order(runs):
     full, ref = _pair(runs, "head_rows_x1")
     assert full["counts"].get("triton:fused_head_vocab_kernel", 0) > 0
     for key in ("loss", "entropy"):
-        assert _rel(full[key][0], ref[key][0]) <= 1e-6, key  # a few fp32 ulps
+        assert _rel(full[key][0], ref[key][0]) <= 1e-6, key                   
     assert full["mean_token_accuracy"][0] == ref["mean_token_accuracy"][0]
     assert full["dh0"].shape == ref["dh0"].shape
     ulps = _ulps16(full["dh0"], ref["dh0"])
@@ -948,9 +948,9 @@ def test_fp16_norm_output_path(runs):
     for a, b in zip(full["mean_token_accuracy"], ref["mean_token_accuracy"]):
         assert abs(a - b) <= 0.01
     worst = max(_rel_l2(g, ref["grads0"][n]) for n, g in full["grads0"].items())
-    assert worst <= 1e-2  # of order 1e-3
-    # dropout on: the masks differ (fp16 vs fp32 dropout input), so the gradients differ by far
-    # more than the numerics above
+    assert worst <= 1e-2                 
+                                                                                               
+                                  
     masked = max(_rel_l2(g, ref_masked["grads0"][n]) for n, g in full_masked["grads0"].items())
     assert masked > 10 * worst
 
@@ -965,7 +965,7 @@ def test_solution_vs_unpatched_baseline(runs):
     runs are held to the harness's checks 5-6: first-step loss within 1%, mean relative gap of
     the loss, entropy and accuracy curves within 3%."""
     base, full = runs["baseline_p0"], runs["full_p0"]
-    assert runs["baseline"]["counts"] == {} and base["counts"] == {}  # no solution code ran
+    assert runs["baseline"]["counts"] == {} and base["counts"] == {}                        
     for run in (full, runs["no_unpad_p0"]):
         assert run["num_tokens"] == base["num_tokens"]
         for key in ("loss", "entropy"):
@@ -976,7 +976,7 @@ def test_solution_vs_unpatched_baseline(runs):
         for name, grad in run["grads0"].items():
             assert _rel_l2(grad, base["grads0"][name]) <= 1e-2, name
         upd, upd_base = _updates(run), _updates(base)
-        for name in upd:  # AdamW's first steps turn sign flips of tiny gradients into lr steps
+        for name in upd:                                                                       
             assert _rel_l2(upd[name], upd_base[name]) <= 1e-1, name
     base, full = runs["baseline"], runs["full"]
     assert full["num_tokens"] == base["num_tokens"]

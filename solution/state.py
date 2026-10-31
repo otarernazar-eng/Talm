@@ -40,7 +40,7 @@ import torch
 
 DISABLED = {}
 
-# What each name covers, and what runs instead once it is off.
+                                                              
 COMPONENTS = {
     "fused_head": "fused causal-LM forward and TRL compute_loss (patches.py, fused_head.py) -> "
                   "transformers' forward and TRL's compute_loss (full logits)",
@@ -71,7 +71,7 @@ COMPONENTS = {
 def _text(exc):
     try:
         return str(exc)
-    except Exception:  # noqa: BLE001 - an exception whose message cannot be built
+    except Exception:                                                             
         return "<message unavailable>"
 
 
@@ -107,7 +107,7 @@ def fallback(component, exc):
         DISABLED[component] = reason
         try:
             print(f"[solution] fallback: {component}: {reason}", flush=True)
-        except Exception:  # noqa: BLE001 - a broken stdout must not end the run either
+        except Exception:                                                              
             pass
     return True
 
@@ -118,6 +118,6 @@ def installing(component):
     component off (one fallback line) instead of failing `soup train`."""
     try:
         yield
-    except Exception as exc:  # noqa: BLE001 - see `fallback`
+    except Exception as exc:                                 
         if not fallback(component, exc):
             raise

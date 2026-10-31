@@ -53,11 +53,11 @@ import triton.language as tl
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
 
-BLOCK_T = 16   # tokens per program
+BLOCK_T = 16                       
 NUM_WARPS = 4
-# The backward writes dq/dk token-major ([1, N, H, D] memory): see the module docstring.
+                                                                                        
 TOKEN_MAJOR_GRAD = os.environ.get("SOLUTION_DISABLE_ROPE_TOKEN_MAJOR") != "1"
-# Input strides passed in whole rows of the head dimension (UNIT = D): see the kernel.
+                                                                                      
 ROW_STRIDES = os.environ.get("SOLUTION_DISABLE_ROPE_ROWS") != "1"
 
 
@@ -123,7 +123,7 @@ def _launch(q, k, cos, sin, backward):
         out_k = torch.empty((1, hk, n, dim), dtype=torch.float16, device=q.device)
         rows = (n, 1, n, 1)
     unit = dim if ROW_STRIDES else 1
-    if unit > 1:  # input strides in whole rows (a copy only for a stride that is not one)
+    if unit > 1:                                                                          
         q, k, cos = _row_strided(q, dim), _row_strided(k, dim), _row_strided(cos, dim)
     grid = (triton.cdiv(n, BLOCK_T), hq + hk)
     rope_kernel[grid](q, k, cos, sin, out_q, out_k, n, hq, q.stride(1) // unit,
@@ -182,7 +182,7 @@ class RoPE(torch.autograd.Function):
                 gq, gk = _launch(dq, dk, cos, sin, backward=1)
                 RAN["rope"] += 1
                 return gq, gk, None, None
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rope", exc):
                     raise
         FELL_BACK["rope"] += 1
@@ -213,7 +213,7 @@ def patch_qwen2_rope():
         if not kwargs and "rope" not in DISABLED and _applies(q, k, cos, sin, unsqueeze_dim):
             try:
                 return RoPE.apply(q, k, cos, sin)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rope", exc):
                     raise
         FELL_BACK["rope"] += 1

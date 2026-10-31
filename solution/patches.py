@@ -39,16 +39,16 @@ from .rmsnorm import link_next_norms
 from .state import DISABLED, fallback
 from .unpad import is_right_padded, rows_context, unpad_batch
 
-STEP_ATTR = "_soup_chunked_step"  # soup_cli.utils.stream_loss_chunk.STEP_ATTR
+STEP_ATTR = "_soup_chunked_step"                                              
 
-_pending_step = []  # the fused step of the last labelled forward, consumed by compute_loss
-_first_forward = [True]  # cleared by the first fused forward (joins the warm-up thread)
+_pending_step = []                                                                         
+_first_forward = [True]                                                                 
 _unpad = {"enabled": os.environ.get("SOLUTION_DISABLE_UNPAD") != "1", "checked": 0}
-# Host-side options (solution/host.py), switched on by solution.apply().
+                                                                        
 _host = {"defer": False, "bookkeeping": False}
-ORIGINAL_FORWARD = {}  # class -> original forward, for tests
-# Non-empty while the patched SFTTrainer.compute_loss runs the fused forward: a "fused_head"
-# failure in the forward is raised on to it, which runs the step again through TRL's own path.
+ORIGINAL_FORWARD = {}                                        
+                                                                                            
+                                                                                              
 _in_compute_loss = []
 
 
@@ -82,7 +82,7 @@ def _head_is_fusable(lm):
     weight = getattr(head, "weight", None)
     return (isinstance(weight, torch.Tensor) and weight.is_cuda and not weight.requires_grad
             and getattr(head, "bias", None) is None and weight.dim() == 2
-            and "forward" not in lm.__dict__)  # an instance-level forward (accelerate hook)
+            and "forward" not in lm.__dict__)                                               
 
 
 def _gradient_checkpointing(lm):
@@ -132,16 +132,16 @@ def patch_qwen2_causal_lm():
             device = self.lm_head.weight.device
             rng_state = torch.cuda.get_rng_state(device)
             stage = []
-            for _ in range(2):  # a failure of the unpadded decoder is retried once, padded
+            for _ in range(2):                                                             
                 try:
                     return _fused_forward(self, input_ids, attention_mask, position_ids,
                                           past_key_values, inputs_embeds, labels, use_cache,
                                           dict(kwargs), CausalLMOutputWithPast, stage)
-                except Exception as exc:  # noqa: BLE001 - see state.py
+                except Exception as exc:                               
                     component = "unpad" if stage[-1:] == ["unpadded"] else "fused_head"
                     if not fallback(component, exc) or (component == "fused_head"
                                                         and _in_compute_loss):
-                        raise  # out of memory; or compute_loss runs the step again (TRL's)
+                        raise                                                              
                 _restart(device, rng_state)
                 if "fused_head" in DISABLED:
                     break
@@ -165,7 +165,7 @@ def _join_warmup():
         from . import warmup
 
         warmup.join()
-    except Exception as exc:  # noqa: BLE001 - see state.py
+    except Exception as exc:                               
         if not fallback("warmup", exc):
             raise
 
@@ -177,12 +177,12 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
     stage.clear()
     if _first_forward:
         _join_warmup()
-        _first_forward.clear()  # after the join: an interrupted join is retried next time
+        _first_forward.clear()                                                            
     kwargs.pop("return_dict", None)
     num_items = kwargs.get("num_items_in_batch")
     batch, seq = labels.shape
-    # Causal shift as ForCausalLMLoss does: position t is scored against label t + 1; the
-    # last position (and every pad) gets -100, so no shift crosses a row.
+                                                                                         
+                                                                         
     shift = torch.nn.functional.pad(labels, (0, 1), value=-100)[:, 1:].reshape(-1)
 
     unpad = ("unpad" not in DISABLED and _unpad["enabled"] and input_ids is not None
@@ -191,10 +191,10 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
              and tuple(attention_mask.shape) == (batch, seq)
              and tuple(input_ids.shape) == (batch, seq)
              and not getattr(self.model, "has_sliding_layers", True))
-    counts = None  # [labelled among the gathered tokens, labelled overall], host ints
+    counts = None                                                                     
     if unpad:
         try:
-            if fused_head.COMPACT:  # the head's labelled count, in the unpad sync (no extra one)
+            if fused_head.COMPACT:                                                               
                 idx, positions, bounds, lengths, counts = unpad_batch(
                     attention_mask, shift.to(attention_mask.device))
             else:
@@ -204,7 +204,7 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
                 if not is_right_padded(attention_mask, lengths):
                     _unpad["enabled"] = False
                     unpad = False
-        except Exception as exc:  # noqa: BLE001 - see state.py: the padded batch instead
+        except Exception as exc:                                                         
             if not fallback("unpad", exc):
                 raise
             unpad, counts = False, None
@@ -213,13 +213,13 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
         RAN["unpad"] += 1
     elif "unpad" in ON:
         FELL_BACK["unpad"] += 1
-    link_next_norms(self.model)  # no-op unless the residual add + norm fusion is on
+    link_next_norms(self.model)                                                     
     n_labelled = None if counts is None else counts[0 if unpad else 1]
     if unpad:
         stage.append("unpadded")
         shift = shift.to(idx.device)[idx]
-        # A prepared mask mapping skips `create_causal_mask` (the per-row attention below
-        # needs no mask at all); only full-attention layers exist here (guard above).
+                                                                                         
+                                                                                     
         with rows_context(bounds, device=input_ids.device):
             outputs = self.model(input_ids=input_ids.reshape(-1)[idx][None],
                                  attention_mask={"full_attention": None},
@@ -241,7 +241,7 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
         from . import _mark
 
         _mark(f"first fused forward done (unpad={unpad}, tokens={hidden.shape[1]})")
-    if unpad:  # back to the padded layout TRL and Soup's rewind read
+    if unpad:                                                        
         full_loss = token_loss.new_zeros(batch * seq)
         full_entropy = token_entropy.new_zeros(batch * seq)
         full_loss[idx] = token_loss
@@ -254,7 +254,7 @@ def _fused_forward(self, input_ids, attention_mask, position_ids, past_key_value
     if _host["defer"] and "defer" not in DISABLED:
         from .host import mark_fused_token_loss
 
-        mark_fused_token_loss(step.token_loss)  # Soup's rewind rows of it stay on the GPU
+        mark_fused_token_loss(step.token_loss)                                            
     _pending_step.append(step)
     return output_cls(loss=loss, logits=None, past_key_values=outputs.past_key_values,
                       hidden_states=outputs.hidden_states, attentions=outputs.attentions)
@@ -299,8 +299,8 @@ def _log_trl_metrics(trainer, mode, inputs, step):
         else:
             raise ValueError("Expected 'attention_mask' or 'position_ids' in inputs.")
         if _host["defer"] and "defer" not in DISABLED:
-            # The same tensors, fetched when TRL's log reads them (host.resolve_metrics): no
-            # host sync between this forward and the backward.
+                                                                                            
+                                                              
             from .host import queue_trl_metrics
 
             entropy = gather(entropy).mean()
@@ -325,8 +325,8 @@ def _fused_model(trainer, model, inputs):
     own path)."""
     lm = _causal_lm_of(model)
     labels = inputs.get("labels") if isinstance(inputs, dict) else None
-    # A label smoother or a custom loss function makes the Trainer pop the labels before
-    # the forward: the fused path would not run, so take TRL's original path instead.
+                                                                                        
+                                                                                     
     if lm is None or getattr(trainer.args, "use_liger_kernel", False) \
             or getattr(trainer, "label_smoother", None) is not None \
             or getattr(trainer, "compute_loss_func", None) is not None \
@@ -340,8 +340,8 @@ def _install_fastpaths(model):
     try:
         from .host import install_model_fastpaths
 
-        install_model_fastpaths(model)  # flat module/parameter lists for train/zero_grad/clip
-    except Exception as exc:  # noqa: BLE001 - see state.py
+        install_model_fastpaths(model)                                                        
+    except Exception as exc:                               
         if not fallback("bookkeeping", exc):
             raise
 
@@ -372,7 +372,7 @@ def patch_sft_compute_loss():
             _in_compute_loss.pop()
         step = _pending_step.pop() if _pending_step else None
         if step is None:
-            # The fused path did not run after all: nothing was logged, and the logits exist.
+                                                                                             
             raise RuntimeError("fused head did not run although it was expected to")
         setattr(self, STEP_ATTR, step)
         _log_trl_metrics(self, mode, inputs, step)
@@ -383,7 +383,7 @@ def patch_sft_compute_loss():
         if "fused_head" not in DISABLED:
             try:
                 lm = _fused_model(self, model, inputs)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("fused_head", exc):
                     raise
         if lm is not None:
@@ -391,11 +391,11 @@ def patch_sft_compute_loss():
             rng_state = torch.cuda.get_rng_state(device)
             try:
                 return fused_compute_loss(self, model, inputs, return_outputs, num_items_in_batch)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("fused_head", exc):
                     raise
-            # TRL's own compute_loss runs the step again: its forward returns the logits, from
-            # which TRL logs its metrics and Soup's rewind recorder takes the row losses.
+                                                                                              
+                                                                                         
             _restart(device, rng_state)
             _pending_step.clear()
             if getattr(self, STEP_ATTR, None) is not None:

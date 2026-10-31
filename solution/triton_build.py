@@ -35,7 +35,7 @@ def _build(name, src, srcdir, library_dirs, include_dirs, libraries):
 
     try:
         return _build_o0(name, src, srcdir, library_dirs, include_dirs, libraries)
-    except Exception as exc:  # noqa: BLE001 - see state.py
+    except Exception as exc:                               
         from .engaged import FELL_BACK
         from .state import fallback
 
@@ -44,7 +44,7 @@ def _build(name, src, srcdir, library_dirs, include_dirs, libraries):
         FELL_BACK["build"] += 1
     if knobs.build.impl is _build:
         knobs.build.impl = None
-    # Triton's NVIDIA driver passes no ccflags (triton/backends/nvidia/driver.py, 3.6)
+                                                                                      
     return build._build(name, src, srcdir, library_dirs, include_dirs, libraries, [])
 
 

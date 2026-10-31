@@ -14,7 +14,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from solution.test_robustness import _batch, _tiny_lm, tiny_qlora  # noqa: F401 - a fixture
+from solution.test_robustness import _batch, _tiny_lm, tiny_qlora                          
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 
@@ -71,8 +71,8 @@ def faults(monkeypatch, capsys):
     yield Faults(monkeypatch, capsys)
     state.DISABLED.clear()
     state.DISABLED.update(saved)
-    # the injected exceptions' tracebacks can form reference cycles holding CUDA tensors: free
-    # them here, not inside a later test's memory measurement
+                                                                                              
+                                                             
     gc.collect()
 
 
@@ -106,7 +106,7 @@ def _norm(hidden=256):
     return norm
 
 
-# --- forward failures: the call runs again through the original code ------------------------
+                                                                                              
 
 def test_rmsnorm_forward_failure_runs_transformers_norm(faults):
     from solution import rmsnorm
@@ -118,7 +118,7 @@ def test_rmsnorm_forward_failure_runs_transformers_norm(faults):
         calls = faults.inject(rmsnorm, "launch")
         first, later = norm(x), norm(x)
     assert torch.equal(first, ref) and torch.equal(later, ref)
-    assert calls["n"] == 1  # the kernel is not tried again
+    assert calls["n"] == 1                                 
     faults.assert_off("rmsnorm")
 
 
@@ -169,7 +169,7 @@ def test_swiglu_forward_failure_runs_transformers_activation(faults, monkeypatch
     torch.manual_seed(2)
     mlp = Qwen2MLP(Qwen2Config(hidden_size=64, intermediate_size=128)).cuda().half()
     x = torch.randn(5, 64, device="cuda", dtype=torch.float16)
-    ref = mlp.down_proj(mlp.act_fn(mlp.gate_proj(x)) * mlp.up_proj(x))  # transformers' forward
+    ref = mlp.down_proj(mlp.act_fn(mlp.gate_proj(x)) * mlp.up_proj(x))                         
     kernel = _FlakyKernel(swiglu_inplace.example_swiglu_fwd_kernel)
     monkeypatch.setattr(swiglu_inplace, "example_swiglu_fwd_kernel", kernel)
     assert torch.equal(mlp(x), ref) and torch.equal(mlp(x), ref)
@@ -203,7 +203,7 @@ def test_attention_failures_fall_back_to_pytorch_sdpa_per_row(faults, monkeypatc
         out.backward(grad)
         return out.detach(), [t.grad for t in (q1, k1, v1)]
 
-    ref, ref_grads = run()  # the variable-length path, no failure
+    ref, ref_grads = run()                                        
     varlen = faults.inject(unpad.VarlenRowsAttention, "apply")
     rows_bwd = faults.inject(unpad.RowsAttention, "_backward")
     out, grads = run()
@@ -212,7 +212,7 @@ def test_attention_failures_fall_back_to_pytorch_sdpa_per_row(faults, monkeypatc
     for ours, theirs in zip(grads, ref_grads):
         torch.testing.assert_close(ours, theirs, rtol=2e-2, atol=2e-2 * float(theirs.abs().max()))
     faults.assert_off("varlen_attention", "rows_attention")
-    run()  # later calls: PyTorch's SDPA per row, no further failure or line
+    run()                                                                   
     assert varlen["n"] == 1 and rows_bwd["n"] == 1 and len(faults.lines()) == 2
 
 
@@ -258,14 +258,14 @@ def test_group_dequant_failure_takes_bitsandbytes_weights(faults, monkeypatch, w
     assert calls["n"] == 1
     faults.assert_off("qgroup")
     assert group.cache["fwd"][0] is None and group.cache["bwd"][0] is None
-    # later projections: bitsandbytes' Linear4bit.forward through the patched entry point
+                                                                                         
     with torch.no_grad():
         later = modules[1](x)
     torch.testing.assert_close(later, F.linear(x, refs[1], modules[1].bias.half()),
                                rtol=2e-3, atol=2e-3)
     assert calls["n"] == 1
     group.expected_bwd = 3
-    qgroup.reset_passes()  # what a forward run again from the start does first
+    qgroup.reset_passes()                                                      
     assert group.expected_bwd == 0 and group.split_left == 0
 
 
@@ -295,12 +295,12 @@ def test_lora_node_failure_gives_pefts_values_and_rng_stream(faults, monkeypatch
             out = forward(q, x)
         return out, torch.cuda.get_rng_state()
 
-    ref, ref_state = run(type(q).forward._original)  # PEFT: one use of the layer's weights
-    calls = faults.inject(lora, "_power_of_two")  # after the base GEMM and the dropout
+    ref, ref_state = run(type(q).forward._original)                                        
+    calls = faults.inject(lora, "_power_of_two")                                       
     out, state = run(lambda module, inp: module(inp))
     assert calls["n"] == 1
     assert torch.equal(out, ref) and torch.equal(state, ref_state)
-    assert group.cache["fwd"][1] == 7 - 2  # two uses (PEFT's twice), not three
+    assert group.cache["fwd"][1] == 7 - 2                                      
     faults.assert_off("lora")
 
 
@@ -314,7 +314,7 @@ def test_fused_head_failure_runs_transformers_forward(faults):
     batch = dict(input_ids=input_ids, attention_mask=mask, labels=labels,
                  num_items_in_batch=(labels[:, 1:] != -100).sum())
     with torch.autocast("cuda", dtype=torch.float16):
-        assert model(**batch).logits is None  # the fused path, no fallback
+        assert model(**batch).logits is None                               
         assert not faults.lines()
         ref = patches.ORIGINAL_FORWARD[Qwen2ForCausalLM](model, **batch)
         calls = faults.inject(fused_head, "launch_vocab")
@@ -322,13 +322,13 @@ def test_fused_head_failure_runs_transformers_forward(faults):
 
         fell_back = engaged.FELL_BACK["head"]
         out, later = model(**batch), model(**batch)
-    assert engaged.FELL_BACK["head"] - fell_back == 2  # both calls counted as fallbacks
+    assert engaged.FELL_BACK["head"] - fell_back == 2                                   
     assert calls["n"] == 1
     for result in (out, later):
         assert torch.equal(result.loss, ref.loss) and torch.equal(result.logits, ref.logits)
-    out.loss.backward()  # the step completes
+    out.loss.backward()                      
     faults.assert_off("fused_head")
-    line = engaged.line("test")  # the run's summary shows it: a fallback count and the switch-off
+    line = engaged.line("test")                                                                   
     assert "head:" in line.split(" fallbacks=")[1] and line.endswith(" disabled=fused_head")
 
 
@@ -340,10 +340,10 @@ def test_unpadded_decoder_failure_reruns_it_padded_through_the_fused_head(faults
     input_ids, mask, labels = _batch([24, 9, 17, 20])
     batch = dict(input_ids=input_ids, attention_mask=mask, labels=labels)
     with torch.autocast("cuda", dtype=torch.float16):
-        ref = model(**batch)  # unpadded
+        ref = model(**batch)            
         calls = faults.inject(patches, "rows_context")
         out = model(**batch)
-    assert calls["n"] == 1 and out.logits is None  # the fused head ran, on the padded batch
+    assert calls["n"] == 1 and out.logits is None                                           
     torch.testing.assert_close(out.loss, ref.loss, rtol=1e-2, atol=1e-2)
     out.loss.backward()
     faults.assert_off("unpad")
@@ -377,7 +377,7 @@ def test_compute_loss_failure_runs_trls_own_compute_loss(faults, monkeypatch):
     pytest.importorskip("trl")
     from solution import fused_head, patches
 
-    model = _tiny_lm()  # applies the solution, compute_loss patch included
+    model = _tiny_lm()                                                     
     monkeypatch.setitem(patches._host, "defer", False)
     monkeypatch.setitem(patches._host, "bookkeeping", False)
     input_ids, mask, labels = _batch([24, 9, 17, 20])
@@ -393,7 +393,7 @@ def test_compute_loss_failure_runs_trls_own_compute_loss(faults, monkeypatch):
     loss = step(ours)
     assert calls["n"] == 1 and getattr(ours, patches.STEP_ATTR, None) is None
     faults.assert_off("fused_head")
-    reference = _fake_trainer(model)  # "fused_head" is off now: TRL's own path
+    reference = _fake_trainer(model)                                           
     assert torch.equal(loss, step(reference))
     assert ours._metrics == reference._metrics and ours._total_train_tokens == int(mask.sum())
     loss.backward()
@@ -431,17 +431,17 @@ def test_qlora_failures_mid_model_keep_the_values_and_the_dequant_bookkeeping(
         out.loss.backward()
         groups = {id(m._solution_group[0]): m._solution_group[0] for m in inner.modules()
                   if getattr(m, "_solution_group", None) is not None}
-        assert len(groups) == 2  # both layers packed (on their first forward)
+        assert len(groups) == 2                                               
         for group in groups.values():
             assert group.cache["fwd"][0] is None and group.cache["bwd"][0] is None
             assert group.expected_bwd == 0 and group.split_left == 0
         return out, [p.grad.clone() for p in params]
 
-    with monkeypatch.context() as patch:  # the reference: separate q, k, v projections
+    with monkeypatch.context() as patch:                                               
         patch.setattr(fused_proj, "qkv_plan", lambda attn, x: None)
         ref, ref_grads = run(lambda: patches.ORIGINAL_FORWARD[Qwen2ForCausalLM](inner, **batch))
-    fused = faults.inject(fused_proj, "_power_of_two", when=_nth(2))  # layer 0's v adapter
-    node = faults.inject(lora, "_power_of_two")  # the LoRA node, which then takes layer 1's q
+    fused = faults.inject(fused_proj, "_power_of_two", when=_nth(2))                       
+    node = faults.inject(lora, "_power_of_two")                                               
     head = faults.inject(fused_head, "launch_vocab")
     out, grads = run(lambda: model(**batch))
     assert fused["raised"] == node["raised"] == head["raised"] == 1
@@ -450,7 +450,7 @@ def test_qlora_failures_mid_model_keep_the_values_and_the_dequant_bookkeeping(
     faults.assert_off("fused_proj", "lora", "fused_head")
 
 
-# --- backward failures: the same gradient from PyTorch ops ----------------------------------
+                                                                                              
 
 def test_rmsnorm_and_addnorm_backward_failures_compute_the_same_gradient(faults):
     from solution import rmsnorm
@@ -531,7 +531,7 @@ def test_swiglu_backward_failure_computes_the_same_gradient(faults, monkeypatch)
     faults.assert_off("swiglu")
 
 
-# --- set-up and build steps ---------------------------------------------------------------
+                                                                                            
 
 def test_apply_leaves_a_component_off_when_its_installation_fails(faults, monkeypatch):
     import solution
@@ -540,7 +540,7 @@ def test_apply_leaves_a_component_off_when_its_installation_fails(faults, monkey
     monkeypatch.setenv("SOLUTION_WARMUP_THREAD", "0")
     monkeypatch.setenv("SOLUTION_DISABLE_STARTUP", "1")
     calls = faults.inject(rope, "patch_qwen2_rope")
-    solution.apply()  # completes
+    solution.apply()             
     assert calls["n"] == 1
     faults.assert_off("rope")
 
@@ -555,8 +555,8 @@ def test_triton_helper_build_falls_back_to_tritons_own(faults, monkeypatch, tmp_
     src = tmp_path / "solution_probe.c"
     src.write_text("int solution_probe(void) { return 1; }\n")
     so = triton_build._build("solution_probe", str(src), str(tmp_path), [], [], [])
-    assert calls["n"] == 1 and os.path.exists(so)  # built by Triton's own command
-    assert knobs.build.impl is None  # Triton's own builds from now on
+    assert calls["n"] == 1 and os.path.exists(so)                                 
+    assert knobs.build.impl is None                                   
     faults.assert_off("triton_build")
 
 
@@ -566,7 +566,7 @@ def test_fp16_embed_failure_leaves_the_weight_as_peft_left_it(faults, monkeypatc
     from solution import fp16_embed
     from solution.test_fp16_embed import _fp16_values, _TiedToy
 
-    def upcast(model, *args, **kwargs):  # PEFT's fp32 upcast of the tied weight
+    def upcast(model, *args, **kwargs):                                         
         weight = model.get_input_embeddings().weight
         weight.data = weight.data.float()
         return model
@@ -579,11 +579,11 @@ def test_fp16_embed_failure_leaves_the_weight_as_peft_left_it(faults, monkeypatc
     assert prepare(toy) is toy and calls["n"] == 1
     weight = toy.embed.weight
     assert weight.dtype == torch.float32 and toy.head.weight is weight
-    assert not toy.embed._forward_hooks  # no fp32 hook on an fp32 weight
+    assert not toy.embed._forward_hooks                                  
     faults.assert_off("fp16_embed")
 
 
-# --- what must propagate ------------------------------------------------------------------
+                                                                                            
 
 @pytest.mark.parametrize("exc", [KeyboardInterrupt("injected"),
                                  torch.cuda.OutOfMemoryError("CUDA out of memory (injected)"),
@@ -599,5 +599,5 @@ def test_interrupt_out_of_memory_and_checkpoint_early_stop_propagate(faults, exc
     with pytest.raises(type(exc)):
         norm(x)
     assert not faults.state.DISABLED and not faults.lines()
-    # still our kernel (fp32 here: the last bits of rsqrt differ from transformers')
+                                                                                    
     torch.testing.assert_close(norm(x), _transformers_rmsnorm(norm, x), rtol=1e-4, atol=1e-5)

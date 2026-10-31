@@ -28,14 +28,14 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a C
 REPO = pathlib.Path(__file__).resolve().parents[1]
 _CAPABILITY = torch.cuda.get_device_capability()[0] if torch.cuda.is_available() else 0
 
-# the `[solution] <label>: ...` lines apply() prints for the start-up patches it runs
+                                                                                     
 STARTUP_LABELS = tuple(label for _, _, label in solution.STARTUP)
 GC_FREEZE_LABELS = ("gc freeze (start)", "gc freeze (end)")
 
-# switch environment -> (keys live by default and gone with it, keys gone by default and live
-# with it, keys live with it). Keys: count:<entry point called in the step>, const:<module
-# constant>, installed:<patch in place>, flag:<state after apply() / the step>, log:<label of
-# a `[solution] <label>: ...` line of apply()>.
+                                                                                             
+                                                                                          
+                                                                                             
+                                               
 CASES = {
     "DISABLE_FUSED_HEAD": ({"SOLUTION_DISABLE_FUSED_HEAD": "1"},
                            ["count:head_vocab", "flag:logits_none", "count:unpad", "count:varlen",
@@ -66,7 +66,7 @@ CASES = {
     "DISABLE_GROUP": ({"SOLUTION_DISABLE_GROUP": "1"},
                       ["count:group", "count:split_dequant", "count:lora", "count:fused_qkv"],
                       ["installed:nf4_dequant"], []),
-    # the q|k|v node runs on whole-layer passes; the split last layer keeps the LoRA node
+                                                                                         
     "DISABLE_FUSED_PROJ": ({"SOLUTION_DISABLE_FUSED_PROJ": "1"}, ["count:fused_qkv"], [],
                            ["count:lora", "count:group"]),
     "DISABLE_FUSED_QKV": ({"SOLUTION_DISABLE_FUSED_QKV": "1"}, ["count:fused_qkv"], [],
@@ -106,12 +106,12 @@ CASES = {
                       ["count:mlp_recompute"], []),
     "MLP_SAVE_UP": ({"SOLUTION_MLP_SAVE_UP": "1"}, ["count:swiglu_inplace"],
                     ["count:mlp_save_up"], ["count:group", "count:lora"]),
-    # the group takes every packed layer: the fused linear is installed but never called
+                                                                                        
     "QLINEAR": ({"SOLUTION_QLINEAR": "1"}, [], ["log:fused 4-bit linear patch on"],
                 ["count:group"]),
     "QLINEAR+DISABLE_GROUP": ({"SOLUTION_QLINEAR": "1", "SOLUTION_DISABLE_GROUP": "1"},
                               ["count:group"], ["count:qlinear"], []),
-    # below compute capability 8 (the T4) the variable-length path is taken without it
+                                                                                      
     "VARLEN unset": ({"SOLUTION_VARLEN": None}, ["count:varlen"], ["count:rows_attn"], [])
     if _CAPABILITY >= 8 else ({"SOLUTION_VARLEN": None}, [], [], ["count:varlen"]),
     "HEAD_VCHUNK=512": ({"SOLUTION_HEAD_VCHUNK": "512"}, [], ["const:head_vchunk_512"],
@@ -139,7 +139,7 @@ def _tiny_checkpoint(path):
 
 def probe(checkpoint):
     """In a fresh process: apply(), one training step, the report as a `PROBE {json}` line."""
-    import transformers  # as the harness does: before apply()
+    import transformers                                       
 
     import solution
 
@@ -205,7 +205,7 @@ def probe(checkpoint):
     attention_mask = (torch.arange(seq, device="cuda")[None] < lengths[:, None]).long()
     labels = input_ids.clone()
     labels[attention_mask == 0] = -100
-    labels[:, :7] = -100  # a prompt: unlabelled rows for the head's compaction
+    labels[:, :7] = -100                                                       
     model.train()
     with torch.autocast("cuda", dtype=torch.float16):
         out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
@@ -236,7 +236,7 @@ def _run_probe(env_changes, checkpoint):
     env = dict(os.environ, SOLUTION_VARLEN="1")
     for name in list(env):
         if name.startswith("SOLUTION_") and name != "SOLUTION_VARLEN":
-            del env[name]  # nothing from the calling process: only this case's switches
+            del env[name]                                                               
     for name, value in env_changes.items():
         if value is None:
             env.pop(name, None)

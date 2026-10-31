@@ -97,9 +97,9 @@ def test_fused_qkv_matches_peft(n_tokens, train):
     for o, r in zip(outs, ref_outs):
         assert o.dtype == torch.float16 and o.shape == r.shape
         _close(o, r)
-    assert outs[2].is_contiguous()  # v is kept by the attention: not a view of the [N, 2048]
-    # PEFT rounds each of the five contributions to fp16 and adds them in fp16; here the three
-    # base ones are summed in fp32: a difference of an fp16 rounding of dx's magnitude
+    assert outs[2].is_contiguous()                                                           
+                                                                                              
+                                                                                      
     _close(dx, ref_dx)
 
 
@@ -213,7 +213,7 @@ def test_fused_nodes_keep_what_the_separate_path_kept():
         q, k, v = FusedProjections.apply(x, group, 0, 3, (), (2,))
         y = FusedMLP.apply(x, group, True)
     big = [s for s in saved if s[1] >= x.numel()]
-    n_pad = -(-n_tok // 8) * 8  # the transposed buffer's token columns, padded to 8
+    n_pad = -(-n_tok // 8) * 8                                                      
     assert big == [(x.untyped_storage().data_ptr(), x.numel()), (big[1][0], 2 * 1024 * n_pad)]
     assert v.untyped_storage().data_ptr() != q.untyped_storage().data_ptr()
     assert q.untyped_storage().data_ptr() == k.untyped_storage().data_ptr()
@@ -294,14 +294,14 @@ def test_fused_backward_in_a_split_pass(monkeypatch):
     calls = _counting(monkeypatch)
     leaf = torch.randn(1, 40, 512, device="cuda", dtype=torch.float16)
     results = []
-    for depth in (1, None):  # None: never split, the reference
+    for depth in (1, None):                                    
         group.depth = depth
         _reset(group)
-        for _ in range(2):  # two steps: the bookkeeping must be reset after each
+        for _ in range(2):                                                       
             calls.update(all=0, one=0)
             x = leaf.clone().requires_grad_(True)
             outs = _layer_pass(group, x)
-            assert calls == {"all": 1, "one": 0}  # the forward is never split here
+            assert calls == {"all": 1, "one": 0}                                   
             sum((o.float() ** 2).mean() for o in outs).backward()
             assert group.split_left == 0 and group.expected_bwd == 0
             assert group.cache["fwd"][0] is None and group.cache["bwd"][0] is None
@@ -405,7 +405,7 @@ def test_patched_qwen2_attention_and_mlp_match_the_separate_path(monkeypatch, n_
         h_m = leaf_m.clone().requires_grad_(True)
         torch.cuda.manual_seed(13)
         with torch.autocast("cuda", dtype=torch.float16):
-            cos, sin = rotary(leaf_a.float(), pos)  # fp32, as from the fp32 residual stream
+            cos, sin = rotary(leaf_a.float(), pos)                                          
             out_a, _ = layer.self_attn(hidden_states=h_a, position_embeddings=(cos, sin),
                                        attention_mask=None)
             out_m = layer.mlp(h_m)
@@ -424,10 +424,10 @@ def test_patched_qwen2_attention_and_mlp_match_the_separate_path(monkeypatch, n_
     took = {key: fused_proj.COUNTS[key] - before[key] for key in before}
     if fused_attn:
         assert took == {"attn": 1, "attn_fallback": 0, "mlp": 1, "mlp_fallback": 0}
-    else:  # the previous path itself (only the attention backward may vary run to run)
+    else:                                                                              
         assert took == {"attn": 0, "attn_fallback": 1, "mlp": 0, "mlp_fallback": 1}
         assert torch.equal(ours[0], ref[0]) and torch.equal(ours[1], ref[1])
     for a, b in zip(ours[:4], ref[:4]):
         _close(a, b)
-    for a, b in zip(ours[4:], ref[4:]):  # the adapters see slightly different upstream grads
+    for a, b in zip(ours[4:], ref[4:]):                                                      
         _close(a, b, scale=1e-2)

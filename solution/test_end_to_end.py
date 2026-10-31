@@ -43,27 +43,27 @@ from solution.test_robustness import CASES
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-FALLBACK = ["left_padded", "mask_with_hole"]  # not right-padded: the padding removal turns off
+FALLBACK = ["left_padded", "mask_with_hole"]                                                   
 EDGE = [case for case in CASES if case not in FALLBACK]
 TRAIN = ["row_without_labels", "full_and_short_rows", "odd_token_counts"]
-# batches whose rows would see each other with merged row bounds (two rows or more, labels)
+                                                                                           
 CONTROL = [case for case in EDGE if len(CASES[case][0]) > 1 and case != "no_label_in_batch"]
-GRAD_SCALE = 4096.0  # the loss scale of the backward passes outside the training steps
+GRAD_SCALE = 4096.0                                                                    
 
-# 4x the largest error measured on an RTX 4080 (sm89, torch 2.11; the runs are deterministic,
-# the same errors to the last digit run after run). Losses: absolute errors (the losses are
-# 6-10); gradients and LoRA updates: relative L2 errors per tensor, the largest of the 8.
-# For scale, the reference's own rounding: the same reference with eager instead of SDPA
-# attention is as far from it (in brackets) as the patched run is.
+                                                                                             
+                                                                                           
+                                                                                         
+                                                                                        
+                                                                  
 TOL = {
-    # at the initial weights (edge and fallback batches, training step 0); measured
-    # loss 1.53e-3 [1.81e-3], per-row losses 4.69e-3 [5.93e-3], gradients 6.02e-3 [8.53e-3]
+                                                                                   
+                                                                                           
     "loss": 6.2e-3, "rows": 1.9e-2, "grad": 2.5e-2,
-    # training steps 1-2 (the weights already differ by the previous updates): per-row losses
-    # 1.46e-2 [7.97e-3], gradients 1.07e-2 [1.23e-2]; the LoRA updates of the 3 steps 3.92e-2
-    # [4.06e-2] (AdamW's first steps are about lr * sign(g): near-zero components can flip)
+                                                                                             
+                                                                                             
+                                                                                           
     "train_rows": 6e-2, "train_grad": 4.3e-2, "delta": 1.6e-1,
-    # eval loss and per-row losses before / after training: 1.54e-3 / 2.39e-3 [2.07e-3]
+                                                                                       
     "eval": 9.6e-3,
 }
 
@@ -79,10 +79,10 @@ def _checkpoint(path):
     gen = torch.Generator().manual_seed(41)
     with torch.no_grad():
         for name, param in model.named_parameters():
-            if not name.endswith("norm.weight"):  # trained-looking scales, not the init's
+            if not name.endswith("norm.weight"):                                          
                 param.copy_(torch.randn(param.shape, generator=gen) * 0.08)
-        model.model.norm.weight.fill_(1.3)  # logits with a standard deviation above 2
-    model.to(torch.bfloat16).save_pretrained(path)  # bf16, as the real checkpoint
+        model.model.norm.weight.fill_(1.3)                                            
+    model.to(torch.bfloat16).save_pretrained(path)                                
 
 
 def _qlora_model(ckpt, attn="sdpa"):
@@ -103,8 +103,8 @@ def _qlora_model(ckpt, attn="sdpa"):
                                              target_modules=["q_proj", "v_proj"],
                                              task_type="CAUSAL_LM"))
     gen = torch.Generator().manual_seed(7)
-    with torch.no_grad():  # the same adapter in every process, whatever else drew numbers
-        for n, p in model.named_parameters():  # (PEFT starts B at 0: A would get no gradient)
+    with torch.no_grad():                                                                 
+        for n, p in model.named_parameters():                                                 
             if p.requires_grad:
                 p.copy_(torch.randn(p.shape, generator=gen) * (0.04 if "lora_A" in n else 0.05))
     return model
@@ -125,7 +125,7 @@ def _child(mode, ckpt, out_path, attn="sdpa"):
     else:
         from solution import triton_build
 
-        build = triton_build._build  # installed as Triton's build hook by apply()
+        build = triton_build._build                                               
         triton_build._build = lambda *a, **k: counts.update(["builds"]) or build(*a, **k)
         import solution
 
@@ -133,7 +133,7 @@ def _child(mode, ckpt, out_path, attn="sdpa"):
         from solution import fused_proj, lora, patches, unpad
 
         for cls, name in ((unpad.VarlenRowsAttention, "varlen"), (lora.LoraProjectionTorch, "lora"),
-                          (fused_proj.FusedProjections, "qkv")):  # which of our nodes ran
+                          (fused_proj.FusedProjections, "qkv")):                          
             cls.apply = (lambda fn, name: lambda *a: counts.update([name]) or fn(*a))(cls.apply,
                                                                                       name)
 
@@ -154,13 +154,13 @@ def _child(mode, ckpt, out_path, attn="sdpa"):
         input_ids, mask, labels = _batch(lengths, **kwargs)
         num_items = (labels[:, 1:] != -100).sum()
         before = dict(counts)
-        with torch.autocast("cuda", dtype=torch.float16):  # use_cache=False: as TRL calls it
+        with torch.autocast("cuda", dtype=torch.float16):                                    
             out = model(input_ids=input_ids, attention_mask=mask, labels=labels,
                         num_items_in_batch=num_items, use_cache=False)
         res["fused"][key] = out.logits is None
         res["nodes"][key] = {k: counts[k] - before.get(k, 0) for k in ("varlen", "lora", "qkv")}
         shift = F.pad(labels, (0, 1), value=-100)[:, 1:]
-        if out.logits is None:  # the fused head: Soup's rewind reads these token losses
+        if out.logits is None:                                                          
             token_loss = patches._pending_step[-1].token_loss.detach().float()
         else:
             token_loss = F.cross_entropy(out.logits.float().flatten(0, 1), shift.flatten(),
@@ -197,13 +197,13 @@ def _child(mode, ckpt, out_path, attn="sdpa"):
         res["edge"][case] = values(case, f"edge/{case}")
     for case in FALLBACK:
         if mode != "reference":
-            patches._unpad["checked"] = 0  # the right-padding check of the first batches runs
+            patches._unpad["checked"] = 0                                                     
         res["fallback"][case] = values(case, f"fallback/{case}")
         if mode != "reference":
             res["unpad_off"][case] = not patches._unpad["enabled"]
-            patches._unpad.update(enabled=True, checked=0)  # a fresh run for the steps below
+            patches._unpad.update(enabled=True, checked=0)                                   
 
-    if mode != "reference":  # the engaged-line counters (engaged.py) around the training steps
+    if mode != "reference":                                                                    
         from solution import engaged, state
 
         fell_back, ran = dict(engaged.FELL_BACK), dict(engaged.RAN)
@@ -229,8 +229,8 @@ def _child(mode, ckpt, out_path, attn="sdpa"):
     evaluate("after")
 
     if mode != "reference":
-        # Negative control: the initial adapter again, the rows of each batch merged into one
-        # (attention across rows; RoPE positions still restart at each row).
+                                                                                             
+                                                                            
         with torch.no_grad():
             for n, p in named:
                 p.copy_(initial[n])
@@ -261,7 +261,7 @@ def runs(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("end_to_end")
     ckpt = tmp / "checkpoint"
     results = {}
-    for mode in ("reference", "patched"):  # the reference also writes the checkpoint
+    for mode in ("reference", "patched"):                                            
         cache = tmp / f"triton_cache_{mode}"
         cache.mkdir()
         results[mode] = _run(mode, ckpt, tmp / f"{mode}.pt", cache)
@@ -280,12 +280,12 @@ def _errors(ours, ref):
     largest relative L2 over the LoRA tensors."""
     loss, rows, grads = ours[:3]
     ref_loss, ref_rows, ref_grads = ref[:3]
-    if torch.isnan(ref_loss):  # no labelled token: 0 / 0, as the base gives
+    if torch.isnan(ref_loss):                                               
         assert torch.isnan(loss)
         e_loss = 0.0
     else:
         e_loss = abs(float(loss) - float(ref_loss))
-    assert grads.keys() == ref_grads.keys() and len(grads) == 8  # q/v A/B in two layers
+    assert grads.keys() == ref_grads.keys() and len(grads) == 8                         
     return (e_loss, float((rows - ref_rows).abs().max()),
             max(_rel(grads[n], ref_grads[n]) for n in grads))
 
@@ -308,9 +308,9 @@ def test_edge_batches_match_the_unpatched_model(runs):
         right_padded = case in EDGE
         key = f"{'edge' if right_padded else 'fallback'}/{case}"
         assert ours["fused"][key] and not ref["fused"][key]
-        nodes = ours["nodes"][key]  # the variable-length attention in both layers (padding
-        assert nodes["varlen"] == (2 if right_padded else 0)  # removal off: none), q and v
-        assert nodes["qkv"] >= 1 and nodes["lora"] + 2 * nodes["qkv"] == 4  # adapted by ours
+        nodes = ours["nodes"][key]                                                         
+        assert nodes["varlen"] == (2 if right_padded else 0)                               
+        assert nodes["qkv"] >= 1 and nodes["lora"] + 2 * nodes["qkv"] == 4                   
         if not right_padded:
             assert ours["unpad_off"][case]
         errors[case] = _errors(ours["edge" if right_padded else "fallback"][case],
@@ -326,10 +326,10 @@ def test_training_steps_match_the_unpatched_model(runs):
         assert ours["train"][i][3] == ref["train"][i][3], "GradScaler scales differ"
         finite = all(torch.isfinite(g).all() for g in ref["train"][i][2].values())
         assert finite == all(torch.isfinite(g).all() for g in ours["train"][i][2].values())
-        if finite:  # (a step the GradScaler skips has inf gradients in both runs)
+        if finite:                                                                
             errors[f"step {i} ({case})"] = _errors(ours["train"][i], ref["train"][i])
     assert errors, "every step skipped by the GradScaler"
-    # a healthy run: the fast paths ran in every step, none fell back or was disabled (state.py)
+                                                                                                
     training = ours["training"]
     print("\n" + training["engaged"])
     assert training["fell_back"] == {} and training["disabled"] == {}, training
@@ -341,7 +341,7 @@ def test_training_steps_match_the_unpatched_model(runs):
     first = {name: errs for name, errs in errors.items() if name.startswith("step 0")}
     _check(first, ("loss", "rows", "grad"))
     _check(errors, ("loss", "train_rows", "train_grad"))
-    assert all(float(d.norm()) > 0 for d in ref["delta"].values())  # the adapter was trained
+    assert all(float(d.norm()) > 0 for d in ref["delta"].values())                           
     deltas = max(_rel(ours["delta"][n], ref["delta"][n]) for n in ref["delta"])
     _check({"LoRA updates of the 3 steps": (deltas,)}, ("delta",))
 
@@ -355,8 +355,8 @@ def test_eval_loss_matches_the_unpatched_model(runs):
         errors[f"eval {when}"] = (max(abs(float(loss) - float(ref_loss)),
                                       float((rows - ref_rows).abs().max())),)
     _check(errors, ("eval",))
-    # the training moved the eval values far more than the tolerance (0.11 measured), so the
-    # comparison after training sees the trained adapter (no stale fp16 copy of it)
+                                                                                            
+                                                                                   
     change = max(abs(float(ref["eval"]["after"][0]) - float(ref["eval"]["before"][0])),
                  float((ref["eval"]["after"][1] - ref["eval"]["before"][1]).abs().max()))
     assert change > 5 * TOL["eval"], change
@@ -404,7 +404,7 @@ def test_triton_build_hook_in_an_empty_cache(tmp_path):
     assert proc.returncode == 0 and "built" in proc.stdout, proc.stdout + proc.stderr[-4000:]
 
 
-# --- a real trl.SFTTrainer run: the fused path against TRL's own ------------------------------
+                                                                                                
 
 def _sft_rows(model):
     """4 rows of different lengths, mostly the model's own greedy continuation (every third
@@ -445,8 +445,8 @@ def _sft_trainer(model, rows, out_dir, callbacks=None):
     trainer = SFTTrainer(model=model, args=args, processing_class=tokenizer,
                          train_dataset=Dataset.from_dict({"input_ids": rows}), callbacks=callbacks)
     for name, param in trainer.model.named_parameters():
-        # TRL 0.29 stores QLoRA adapters in bf16; with fp16 Soup casts them back to fp32 before
-        # the optimizer exists (soup_cli.utils.mixed_precision.align_trainable_dtype_for_fp16)
+                                                                                               
+                                                                                              
         if param.requires_grad and "lora_" in name and param.dtype == torch.bfloat16:
             param.data = param.data.to(torch.float32)
     return trainer
@@ -496,11 +496,11 @@ def test_sft_trainer_logs_trl_values_from_the_fused_step(monkeypatch, sft_setup)
         else:
             assert step is not None and int(step.labelled) == n_labelled
             wrapped = trainer.model_wrapped if trainer.model_wrapped is not None else trainer.model
-            assert "_solution_params" in wrapped.__dict__  # the bookkeeping fast paths
+            assert "_solution_params" in wrapped.__dict__                              
     print(logs)
     assert len(logs["trl"]) == len(logs["fused"]) == 2
     first_accuracy = logs["trl"][0]["mean_token_accuracy"]
-    assert 0.3 < first_accuracy < 0.9  # planted hits and misses: the check can fail both ways
+    assert 0.3 < first_accuracy < 0.9                                                         
     for ours, ref in zip(logs["fused"], logs["trl"]):
         assert abs(ours["loss"] - ref["loss"]) <= 2e-3
         assert abs(ours["entropy"] - ref["entropy"]) <= 1e-3
@@ -532,7 +532,7 @@ def test_sft_compute_loss_falls_back_to_trl(monkeypatch, sft_setup):
         return outputs, inputs
 
     model.train()
-    assert call()[0].logits is None  # the fused path by default
+    assert call()[0].logits is None                             
     with monkeypatch.context() as m:
         m.setattr(trainer, "label_smoother", transformers.trainer_pt_utils.LabelSmoother(0.1))
         assert call()[0].logits is not None
@@ -541,15 +541,15 @@ def test_sft_compute_loss_falls_back_to_trl(monkeypatch, sft_setup):
                   lambda outputs, labels, num_items_in_batch=None: outputs.logits.float().mean())
         assert call()[0].logits is not None
     with monkeypatch.context() as m, warnings.catch_warnings():
-        warnings.simplefilter("ignore")  # TRL: Liger "did not return token_accuracy"
+        warnings.simplefilter("ignore")                                              
         m.setattr(trainer.args, "use_liger_kernel", True)
-        assert call()[1].get("return_token_accuracy") is True  # TRL's own branch ran
+        assert call()[1].get("return_token_accuracy") is True                        
     model.eval()
     assert call()[0].logits is not None
     model.train()
 
-    # the wrapper expects the fused path, the forward then does not take it: the guard's error
-    # turns the fused head off (state.py) and TRL's own compute_loss runs the step instead
+                                                                                              
+                                                                                          
     expected, saved = [], dict(state.DISABLED)
     try:
         state.DISABLED.clear()
@@ -565,13 +565,13 @@ def test_sft_compute_loss_falls_back_to_trl(monkeypatch, sft_setup):
 
     class Fail(transformers.TrainerCallback):
         def on_step_end(self, args, state, control, **kwargs):
-            raise KeyboardInterrupt  # after the step's metrics were queued, before its log
+            raise KeyboardInterrupt                                                        
 
     assert patches._host["defer"]
     trainer = _sft_trainer(_qlora_model(tmp_path / "checkpoint"), rows, tmp_path / "fail",
                            callbacks=[Fail()])
     with pytest.raises(KeyboardInterrupt):
         trainer.train()
-    assert not host._metric_queue  # flushed on the way out
+    assert not host._metric_queue                          
     assert len(trainer._metrics["train"]["entropy"]) == 1
     assert len(trainer._metrics["train"]["mean_token_accuracy"]) == 1

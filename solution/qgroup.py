@@ -50,21 +50,21 @@ import triton.language as tl
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
 
-ROWS = 64       # absmax blocks per program: 64 x 32 bytes = 2048 bytes = 4096 weights
+ROWS = 64                                                                             
 NUM_WARPS = 4
-NSEG = 7  # q, k, v, o, gate, up, down
-# bitsandbytes' NF4 block sizes with double quantization, as in Soup's 4-bit config: 64 weights
-# per absmax, 256 absmax per second-level scale (the warm-up thread compiles these constexprs).
+NSEG = 7                              
+                                                                                               
+                                                                                               
 WARMUP_QBLOCK, WARMUP_QBLOCK2 = 64, 256
-# NormalFloat4 levels, index = 4-bit code (bitsandbytes `create_normal_map`, rounded to fp32).
+                                                                                              
 NF4_LEVELS = [-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453,
               -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
               0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224,
               0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0]
-# The forward of the last layer and the backward of the last two run while (almost) every
-# activation of the step is alive, at the peak of the step: there each projection is dequantized
-# alone (26 MiB at most, freed after its GEMM) instead of the whole layer (89 MiB, alive for the
-# whole pass of the layer). 1 + 2 layers x 6 extra launches per step.
+                                                                                         
+                                                                                                
+                                                                                                
+                                                                     
 _SPLIT_OFF = os.environ.get("SOLUTION_DISABLE_SPLIT_DEQUANT") == "1"
 SPLIT_LAYERS = {"fwd": 0 if _SPLIT_OFF else 1, "bwd": 0 if _SPLIT_OFF else 2}
 
@@ -74,14 +74,14 @@ def nf4_group_dequant_kernel(packed_ptr, absmax8_ptr, code_ptr, absmax2_ptr, off
                              levels_ptr, out_ptr, QBLOCK: tl.constexpr, QBLOCK2: tl.constexpr,
                              ROWS: tl.constexpr):
     """out (fp16 pairs as uint32) of rows [pid * ROWS, pid * ROWS + ROWS) of QBLOCK weights."""
-    HALF: tl.constexpr = QBLOCK // 2  # packed bytes per absmax block
+    HALF: tl.constexpr = QBLOCK // 2                                 
     rows = tl.program_id(0) * ROWS + tl.arange(0, ROWS)
-    # fp32 scale of each block: double-quantized absmax, rounded as bitsandbytes rounds it
+                                                                                          
     code_index = tl.load(absmax8_ptr + rows).to(tl.int32)
     block2 = rows // QBLOCK2
     scale = tl.load(code_ptr + code_index) * tl.load(absmax2_ptr + block2) \
         + tl.load(offset2_ptr + block2)
-    # the row's bytes, contiguous: element 2i is the high nibble of byte i, 2i+1 the low one
+                                                                                            
     words = rows[:, None] * HALF + tl.arange(0, HALF)[None, :]
     packed = tl.load(packed_ptr + words).to(tl.int32)
     level_first = tl.load(levels_ptr + (packed >> 4))
@@ -137,14 +137,14 @@ class LayerGroup:
         self.qblock, self.qblock2 = first.blocksize, first.state2.blocksize
         self.shapes = [tuple(s.shape) for s in states]
         self.numels = [a * b for a, b in self.shapes]
-        self.pair_bounds = []  # cumulative pair offsets, len NSEG + 1
+        self.pair_bounds = []                                         
         total = 0
         for n in self.numels:
             self.pair_bounds.append(total)
             total += n // 2
         self.pair_bounds.append(total)
         self.elem_bounds = [2 * p for p in self.pair_bounds]
-        # Pack: the parameters and their absmax tensors become views of three contiguous buffers.
+                                                                                                 
         packed = torch.cat([m.weight.data.view(-1) for m in modules])
         absmax8 = torch.cat([s.absmax.view(-1) for s in states])
         absmax2 = torch.cat([s.state2.absmax.view(-1) for s in states])
@@ -162,30 +162,30 @@ class LayerGroup:
         self.offsets = torch.stack([s.offset.reshape(()).to(torch.float32)
                                     for s in states]).to(device)
         self.n_pairs = total
-        # The grid tiles the layer exactly (no mask) and the index math is int32.
+                                                                                 
         half = self.qblock // 2
         if half & (half - 1) or total % (ROWS * half) or total >= 2 ** 31:
             raise ValueError("layer size does not fit the kernel's tiling")
         self.n_rows = total // half
-        # absmax offset per absmax2 block (no block straddles two weights: checked above)
+                                                                                         
         self.offset2 = torch.cat([self.offsets[i:i + 1].expand(n // (self.qblock * self.qblock2))
                                   for i, n in enumerate(self.numels)])
         self.levels = _levels(device)
         self.biases = [None if m.bias is None else m.bias.detach().to(torch.float16)
                        for m in modules]
-        self.params = [m.weight for m in modules]  # for bitsandbytes' dequantization (fallback)
-        self._span_biases = {}  # (first, last) -> concatenated biases (span_bias)
+        self.params = [m.weight for m in modules]                                               
+        self._span_biases = {}                                                    
         self.cache = {"fwd": [None, 0], "bwd": [None, 0]}
-        self.expected_bwd = 0  # projections of the current step whose backward will run
-        self.split_left = 0  # uses left in a per-projection backward pass
-        self.checkpointed = False  # the layer runs under gradient checkpointing (start_forward)
-        self.depth = None  # 0 for the last decoder layer, 1 for the one before, ...
-        # One projection alone is a slice launch of the same kernel: it must tile exactly too
-        # and start on an absmax2 block (true when every weight is a multiple of ROWS blocks
-        # and of the double block, as for Qwen2.5). Its fp32 absmax2/offset2 slices must also
-        # start on 16 bytes (a multiple of 4 double blocks, true for Qwen2.5): Triton specializes
-        # on pointer alignment, and an unaligned slice would compile the kernel a second time,
-        # inside the training loop.
+        self.expected_bwd = 0                                                           
+        self.split_left = 0                                               
+        self.checkpointed = False                                                               
+        self.depth = None                                                           
+                                                                                             
+                                                                                            
+                                                                                             
+                                                                                                 
+                                                                                              
+                                   
         self.row_bounds = [e // self.qblock for e in self.elem_bounds]
         self.splittable = all(
             (r1 - r0) % ROWS == 0 and r0 % (4 * self.qblock2) == 0
@@ -218,7 +218,7 @@ class LayerGroup:
         if "qgroup" not in DISABLED:
             try:
                 return self._weight(which, idx)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("qgroup", exc):
                     raise
         return self.reference_weight(idx)
@@ -279,26 +279,26 @@ class LayerGroup:
             RAN["group"] += 1
             if which == "fwd":
                 entry[1] = NSEG
-            else:  # as many uses as projections whose input required grad in the forward
+            else:                                                                        
                 entry[1] = max(self.expected_bwd, 1)
                 self.expected_bwd = 0
         buf = entry[0]
         entry[1] -= uses
         if entry[1] <= 0:
-            entry[0] = None  # the seventh use of this pass: drop the buffer after returning
+            entry[0] = None                                                                 
         return buf
 
     def _weight(self, which, idx):
         if self.split_now(which):
-            if self.checkpointed:  # no per-pass state (start_forward)
-                self.expected_bwd = 0  # counts of a forward that runs twice: meaningless here
+            if self.checkpointed:                                     
+                self.expected_bwd = 0                                                         
                 if not self.splittable:
                     RAN["group"] += 1
                     full = self.dequantize_all()
                     return full[self.elem_bounds[idx]:self.elem_bounds[idx + 1]].view(
                         self.shapes[idx])
             elif which == "bwd":
-                if self.split_left == 0:  # first use in this backward pass
+                if self.split_left == 0:                                   
                     self.split_left = max(self.expected_bwd, 1)
                     self.expected_bwd = 0
                 self.split_left -= 1
@@ -320,7 +320,7 @@ class LayerGroup:
             if self.split_now(which):
                 return None
             buf = self._take(which, last - first)
-        except Exception as exc:  # noqa: BLE001 - see state.py
+        except Exception as exc:                               
             if not fallback("qgroup", exc):
                 raise
             return None
@@ -355,8 +355,8 @@ class GroupLinear(torch.autograd.Function):
         return torch.matmul(grad_out, weight), None, None
 
 
-_CHECKED = False  # the kernel is compared with bitsandbytes on the first packed layer
-_GROUPS = []  # weak references to every packed LayerGroup (reset_passes)
+_CHECKED = False                                                                      
+_GROUPS = []                                                             
 
 
 def reset_passes():
@@ -420,7 +420,7 @@ def _pack(layer):
         group = LayerGroup(modules)
         if not _CHECKED and not _self_check(group, modules):
             return None
-    except Exception:  # noqa: BLE001 - keep the per-projection path for this layer
+    except Exception:                                                              
         return None
     globals()["_CHECKED"] = True
     attn = getattr(layer, "self_attn", None)
@@ -434,10 +434,10 @@ def _pack(layer):
     return group
 
 
-# Set by solution.apply(): when on, a layer that cannot be packed sends its 4-bit projections'
-# dequantization through our per-projection kernel (nf4_dequant.py). That patch is installed on
-# first need, not up front: in this task every layer is packed, and installing it at start-up
-# would only compile its kernel for its own self-check, inside the measured time.
+                                                                                              
+                                                                                               
+                                                                                             
+                                                                                 
 FALLBACK_DEQUANT = False
 
 
@@ -452,11 +452,11 @@ def setup_layer(layer):
         return
     layer._solution_group_done = True
     group = _pack(layer)
-    layer._solution_layer_group = group  # for enter_layer; None: the layer is not packed
+    layer._solution_layer_group = group                                                  
     if group is None and FALLBACK_DEQUANT and _has_4bit(layer):
         from .nf4_dequant import patch_bnb_dequant
 
-        patch_bnb_dequant()  # idempotent; keeps bitsandbytes' kernel if its self-check fails
+        patch_bnb_dequant()                                                                  
 
 
 def _wrapped(layer):
@@ -487,12 +487,12 @@ def enter_layer(layer):
         if group is not None:
             group.start_forward(bool(getattr(layer, "training", False) and (
                 getattr(layer, "gradient_checkpointing", False) or _wrapped(layer))))
-    except Exception as exc:  # noqa: BLE001 - see state.py
+    except Exception as exc:                               
         if not fallback("qgroup", exc):
             raise
 
 
-prepare_layer = enter_layer  # (the name rmsnorm.py's add+norm forward used before)
+prepare_layer = enter_layer                                                        
 
 
 def patch_group_dequant():
@@ -528,14 +528,14 @@ def patch_group_dequant():
             group, idx = tag
             try:
                 out = GroupLinear.apply(x, group, idx)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("qgroup", exc):
                     raise
             else:
                 if torch.is_grad_enabled() and x.requires_grad:
-                    group.expected_bwd += 1  # this projection's backward will ask for the weight
+                    group.expected_bwd += 1                                                      
                 return out
-        # an unpacked projection, not an fp16 CUDA input, or the grouped dequant off
+                                                                                    
         FELL_BACK["group"] += 1
         return lin_forward(self, x)
 

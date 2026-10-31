@@ -79,10 +79,10 @@ from .lora import _power_of_two, _to_half, lora_plan
 from .state import DISABLED, fallback
 from .swiglu import BLOCK, example_swiglu_bwd_kernel, example_swiglu_fwd_kernel
 
-Q, K, V, O, GATE, UP, DOWN = range(7)  # projection order in qgroup.PROJECTIONS
-# The in-place SwiGLU backward (swiglu_inplace.py), unless its switch turns it off.
+Q, K, V, O, GATE, UP, DOWN = range(7)                                          
+                                                                                   
 INPLACE = os.environ.get("SOLUTION_DISABLE_SWIGLU_INPLACE") != "1"
-COUNTS = {"attn": 0, "attn_fallback": 0, "mlp": 0, "mlp_fallback": 0}  # calls, for the log
+COUNTS = {"attn": 0, "attn_fallback": 0, "mlp": 0, "mlp_fallback": 0}                      
 
 
 class FusedProjections(torch.autograd.Function):
@@ -100,7 +100,7 @@ class FusedProjections(torch.autograd.Function):
             return FusedProjections._forward(ctx, x, group, first, last, adapters, compact,
                                              lora_weights, states)
         except Exception:
-            # the previous path (state.py) takes the base weights and draws the dropout again
+                                                                                             
             if ctx.fetched:
                 group.refund("fwd", last - first)
             drawn = [state for state in states if state is not None]
@@ -122,9 +122,9 @@ class FusedProjections(torch.autograd.Function):
         results = [None] * len(sizes)
         saved = [x2]
         for k, (seg, scaling, p) in enumerate(adapters):
-            # PEFT's adapter ops, as lora.LoraProjectionTorch runs them (draws in PEFT's order:
-            # q_proj's dropout, then v_proj's, nothing random in between); the fp16 A and B
-            # from lora.py's cast cache (bit-identical to `.to(float16)`)
+                                                                                               
+                                                                                           
+                                                                         
             a16, b16 = _to_half(lora_weights[2 * k], lora_weights[2 * k + 1])
             state = None
             if p > 0:
@@ -133,15 +133,15 @@ class FusedProjections(torch.autograd.Function):
             else:
                 xd = x2
             t = torch.mm(xd, a16.t())
-            del xd  # not kept: regenerated in the backward
+            del xd                                         
             branch = torch.mm(t, b16.t())
             base = out[:, bounds[seg]:bounds[seg + 1]]
             alpha = scaling
             if not _power_of_two(scaling):
                 branch.mul_(scaling)
                 alpha = 1
-            # the same fp16 add as PEFT's `result + output`, in place on the slice, or into a
-            # fresh tensor for a compact segment (the same arithmetic either way)
+                                                                                             
+                                                                                 
             results[seg] = (torch.add(base, branch, alpha=alpha) if seg in compact
                             else base.add_(branch, alpha=alpha))
             states.append(state)
@@ -164,7 +164,7 @@ class FusedProjections(torch.autograd.Function):
         group = ctx.group
         dys = []
         for grad, size in zip(grads, ctx.sizes):
-            if grad is None:  # an output that did not reach the loss
+            if grad is None:                                         
                 dys.append(x2.new_zeros(n_tok, size))
                 continue
             dy = grad.reshape(n_tok, size)
@@ -172,10 +172,10 @@ class FusedProjections(torch.autograd.Function):
         dx = None
         if ctx.needs_input_grad[0]:
             weight = group.span("bwd", ctx.first, ctx.last)
-            if weight is not None:  # one GEMM over [dq|dk|dv] (K = sum of the outputs)
+            if weight is not None:                                                     
                 dx = torch.mm(torch.cat(dys, 1), weight)
                 del weight
-            else:  # a split pass: one weight at a time, the GEMMs accumulated by cuBLAS
+            else:                                                                       
                 for i, dy in enumerate(dys):
                     weight = group.weight("bwd", ctx.first + i)
                     if dx is None:
@@ -190,25 +190,25 @@ class FusedProjections(torch.autograd.Function):
             state = ctx.states[k]
             mask = None
             xd = x2
-            if state is not None:  # the forward's draw, replayed, then the generator put back
+            if state is not None:                                                             
                 device = x2.device
                 current = torch.cuda.get_rng_state(device)
                 torch.cuda.set_rng_state(state, device)
                 xd, mask = torch.native_dropout(x2, p, True)
                 torch.cuda.set_rng_state(current, device)
-            g = dy * scaling  # the gradient of lora_B's output, as PEFT's `* scaling` gives it
+            g = dy * scaling                                                                   
             u = torch.mm(g, b16)
             if dx is not None:
-                # PEFT's input gradient of the adapter: lora_A's, then the dropout's backward
-                # (an addcmul_ with the bool mask was measured slower on the T4: it runs
-                # PyTorch's unvectorized elementwise kernel, 76 us against 25 + 22 us)
+                                                                                             
+                                                                                        
+                                                                                      
                 dx_lora = torch.mm(u, a16)
                 if mask is not None:
                     dx_lora = torch.ops.aten.native_dropout_backward(dx_lora, mask,
                                                                      1.0 / (1.0 - p))
                 dx.add_(dx_lora)
                 del dx_lora
-            index = 6 + 2 * k  # lora_A's position among forward's inputs
+            index = 6 + 2 * k                                            
             lora_grads.append(torch.mm(u.t(), xd).float() if ctx.needs_input_grad[index]
                               else None)
             lora_grads.append(torch.mm(g.t(), t).float() if ctx.needs_input_grad[index + 1]
@@ -218,7 +218,7 @@ class FusedProjections(torch.autograd.Function):
         return (dx, None, None, None, None, None, *lora_grads)
 
 
-PAD = 8  # token columns of the transposed MLP buffers are padded to a multiple of this
+PAD = 8                                                                                
 
 
 def _pad_rows(t2):
@@ -248,12 +248,12 @@ class FusedMLP(torch.autograd.Function):
         x2 = x.reshape(-1, x.shape[-1])
         n_tok = x2.shape[0]
         inter = group.shapes[GATE][0]
-        out_t = torch.mm(group.span("fwd", GATE, DOWN), _pad_rows(x2).t())  # [gate^T; up^T]
+        out_t = torch.mm(group.span("fwd", GATE, DOWN), _pad_rows(x2).t())                  
         act_t = torch.empty((inter, out_t.shape[1]), dtype=out_t.dtype, device=out_t.device)
         n = act_t.numel()
         example_swiglu_fwd_kernel[(triton.cdiv(n, BLOCK),)](out_t[:inter], out_t[inter:], act_t,
                                                            n, BLOCK=BLOCK)
-        y = torch.mm(act_t.t(), group.span("fwd", DOWN, DOWN + 1).t())[:n_tok]  # [N, H]
+        y = torch.mm(act_t.t(), group.span("fwd", DOWN, DOWN + 1).t())[:n_tok]          
         del act_t
         ctx.save_for_backward(out_t)
         ctx.group, ctx.inplace, ctx.x_shape, ctx.n_tok = group, inplace, x.shape, n_tok
@@ -270,18 +270,18 @@ class FusedMLP(torch.autograd.Function):
         w_down = group.span("bwd", DOWN, DOWN + 1)
         if w_down is None:
             w_down = group.weight("bwd", DOWN)
-        dact_t = torch.mm(w_down.t(), _pad_rows(dy).t())  # d(act)^T, the layout of gate^T
+        dact_t = torch.mm(w_down.t(), _pad_rows(dy).t())                                  
         del w_down
-        d_t = out_t if ctx.inplace else torch.empty_like(out_t)  # [dgate^T; dup^T]
+        d_t = out_t if ctx.inplace else torch.empty_like(out_t)                    
         n = dact_t.numel()
         example_swiglu_bwd_kernel[(triton.cdiv(n, BLOCK),)](dact_t, out_t[:inter], out_t[inter:],
                                                            d_t[:inter], d_t[inter:], n,
                                                            BLOCK=BLOCK)
         del dact_t
         weight = group.span("bwd", GATE, DOWN)
-        if weight is not None:  # one GEMM over [dgate | dup] (K = 2I)
+        if weight is not None:                                        
             dx = torch.mm(d_t.t(), weight)
-        else:  # a split pass: one weight at a time
+        else:                                      
             dx = torch.mm(d_t[:inter].t(), group.weight("bwd", GATE))
             dx.addmm_(d_t[inter:].t(), group.weight("bwd", UP))
         return dx[:n_tok].view(ctx.x_shape), None, None
@@ -332,7 +332,7 @@ def qkv_plan(attn, x):
         modules.append(module)
         if tag is None:
             if not getattr(type(module).forward, "_solution_lora", False) or "lora" in DISABLED:
-                return None  # PEFT's own forward (the LoRA node switched off) or another module
+                return None                                                                     
             plan = lora_plan(module, x)
             if plan is None:
                 return None
@@ -400,26 +400,26 @@ def patch_qwen2_attention():
         if plan is None:
             COUNTS["attn_fallback"] += 1
             if _counted_fallback(getattr(self, "q_proj", None)):
-                FELL_BACK["fused_proj"] += 1  # a packed layer took the previous path
+                FELL_BACK["fused_proj"] += 1                                         
             return original(self, hidden_states, position_embeddings, attention_mask,
                             past_key_values=past_key_values, **kwargs)
         group, adapters, weights = plan
         try:
             q, k, v = FusedProjections.apply(hidden_states, group, Q, V + 1, adapters, (V - Q,),
                                              *weights)
-        except Exception as exc:  # noqa: BLE001 - see state.py
+        except Exception as exc:                               
             if not fallback("fused_proj", exc):
                 raise
             q = None
         if q is None:
             COUNTS["attn_fallback"] += 1
-            FELL_BACK["fused_proj"] += 1  # engaged.py's `fallbacks=`: this call degraded
+            FELL_BACK["fused_proj"] += 1                                                 
             return original(self, hidden_states, position_embeddings, attention_mask,
                             past_key_values=past_key_values, **kwargs)
         COUNTS["attn"] += 1
         RAN["fused_proj"] += 1
         if torch.is_grad_enabled() and hidden_states.requires_grad:
-            group.expected_bwd += 3  # the node's backward takes the three weights as one
+            group.expected_bwd += 3                                                      
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
         query_states = q.view(hidden_shape).transpose(1, 2)
@@ -461,26 +461,26 @@ def patch_qwen2_mlp():
         if group is None:
             COUNTS["mlp_fallback"] += 1
             if _counted_fallback(getattr(self, "gate_proj", None)):
-                FELL_BACK["fused_mlp"] += 1  # a packed layer took the previous path
+                FELL_BACK["fused_mlp"] += 1                                         
             return previous(self, x)
         uses = group.cache["fwd"][1]
         try:
             y = FusedMLP.apply(x, group, INPLACE)
-        except Exception as exc:  # noqa: BLE001 - see state.py (opt-in node)
+        except Exception as exc:                                             
             if not fallback("fused_mlp", exc):
                 raise
             y = None
         if y is None:
             entry = group.cache["fwd"]
-            if entry[0] is not None and entry[1] < uses:  # the uses the failed node took
+            if entry[0] is not None and entry[1] < uses:                                 
                 entry[1] = uses
             COUNTS["mlp_fallback"] += 1
-            FELL_BACK["fused_mlp"] += 1  # engaged.py's `fallbacks=`: this call degraded
+            FELL_BACK["fused_mlp"] += 1                                                 
             return previous(self, x)
         COUNTS["mlp"] += 1
         RAN["fused_mlp"] += 1
         if torch.is_grad_enabled() and x.requires_grad:
-            group.expected_bwd += 3  # down, then gate|up as one, in the node's backward
+            group.expected_bwd += 3                                                     
         return y
 
     forward._solution_fused = True

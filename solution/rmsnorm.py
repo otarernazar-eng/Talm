@@ -51,7 +51,7 @@ import triton.language as tl
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
 
-BLOCK = 2048  # >= hidden size (1536 for Qwen2.5-1.5B); one row per program
+BLOCK = 2048                                                               
 NUM_WARPS = 4
 
 
@@ -145,14 +145,14 @@ class RMSNorm(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dy):
         xhat, weight, rstd = ctx.saved_tensors
-        dy2 = _rows(dy)  # autograd hands dy in y's dtype, the dtype of xhat
+        dy2 = _rows(dy)                                                     
         if "rmsnorm" not in DISABLED:
             try:
                 dx = torch.empty(xhat.shape, dtype=ctx.x_dtype, device=dy.device)
                 launch(dx, weight, dy2, xhat, rstd, ctx.eps, backward=1)
                 RAN["rmsnorm"] += 1
                 return dx.view(dy.shape), None, None, None
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rmsnorm", exc):
                     raise
         FELL_BACK["rmsnorm"] += 1
@@ -182,7 +182,7 @@ class AddRMSNorm(torch.autograd.Function):
     @staticmethod
     def backward(ctx, ds, dy):
         xhat, weight, rstd = ctx.saved_tensors
-        if dy is None:  # the norm output did not reach the loss: the sum's gradient only
+        if dy is None:                                                                   
             return ds, ds.to(ctx.branch_dtype), None, None, None
         shape = dy.shape
         if ds is None:
@@ -194,7 +194,7 @@ class AddRMSNorm(torch.autograd.Function):
                 launch(dx, weight, _rows(dy), xhat, rstd, ctx.eps, backward=1, p=db, q=_rows(ds))
                 RAN["addnorm"] += 1
                 return dx.view(shape), db.view(shape), None, None, None
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("addnorm", exc):
                     raise
         FELL_BACK["addnorm"] += 1
@@ -207,7 +207,7 @@ def _autocast_dtype():
     try:
         if torch.is_autocast_enabled("cuda"):
             return torch.get_autocast_dtype("cuda")
-    except TypeError:  # older signature
+    except TypeError:                   
         if torch.is_autocast_enabled():
             return torch.get_autocast_gpu_dtype()
     return None
@@ -247,13 +247,13 @@ def patch_qwen2_rmsnorm():
     def forward(self, hidden_states):
         normed = _take_normed(hidden_states, self)
         if normed is not None:
-            return normed  # computed with the residual add that produced hidden_states
-        # (not applicable: a 16-bit input with an fp32 weight promotes; or the component is off)
+            return normed                                                              
+                                                                                                
         if "rmsnorm" not in DISABLED and _norm_applies(self, hidden_states):
             try:
                 return RMSNorm.apply(hidden_states, self.weight, self.variance_epsilon,
                                      _out_dtype(hidden_states))
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rmsnorm", exc):
                     raise
         FELL_BACK["rmsnorm"] += 1
@@ -279,7 +279,7 @@ def link_next_norms(model):
     """Tell every decoder layer of a Qwen2Model which norm reads its output: the next layer's
     `input_layernorm`, and the final `norm` for the last layer. The layer then folds its MLP
     residual add into that norm's kernel (`patch_qwen2_add_norm`)."""
-    if not LAYER_FORWARDS:  # patch_qwen2_add_norm is not installed: nothing reads the links
+    if not LAYER_FORWARDS:                                                                  
         return
     layers = list(getattr(model, "layers", []))
     final = getattr(model, "norm", None)
@@ -326,7 +326,7 @@ def _add_norm(residual, branch, norm):
     try:
         return AddRMSNorm.apply(residual, branch, norm.weight, norm.variance_epsilon,
                                 _out_dtype(residual))
-    except Exception as exc:  # noqa: BLE001 - see state.py
+    except Exception as exc:                               
         if not fallback("addnorm", exc):
             raise
     return None
@@ -350,18 +350,18 @@ def patch_qwen2_add_norm():
     from . import _in_chain
 
     if _in_chain(original, "_solution_add_norm"):
-        # installed already, possibly under qgroup's layer wrapper: a second wrapper would also
-        # make LAYER_FORWARDS["original"] our own forward
+                                                                                               
+                                                         
         return
 
     def forward(self, hidden_states, attention_mask=None, position_ids=None,
                 past_key_values=None, use_cache=False, position_embeddings=None, **kwargs):
-        # Under gradient checkpointing the layer's forward runs again inside the backward, where
-        # no norm output handed over by the previous layer exists (and with use_reentrant the
-        # first run is under no_grad): a checkpointed layer neither takes nor hands one over.
+                                                                                                
+                                                                                             
+                                                                                             
         checkpointed = self.training and getattr(self, "gradient_checkpointing", False)
         if checkpointed:
-            _take_normed(hidden_states, self.input_layernorm)  # dropped: the norm runs here
+            _take_normed(hidden_states, self.input_layernorm)                               
         post = self.post_attention_layernorm
         if "addnorm" in DISABLED or not (hidden_states.dtype == torch.float32
                                          and _norm_applies(post, hidden_states)):
@@ -371,9 +371,9 @@ def patch_qwen2_add_norm():
                             use_cache=use_cache, position_embeddings=position_embeddings,
                             **kwargs)
         if getattr(original, "_solution_group", False):
-            from .qgroup import enter_layer  # patched after qgroup's layer wrapper: keep its job
+            from .qgroup import enter_layer                                                      
 
-            enter_layer(self)  # never fatal (state.py)
+            enter_layer(self)                          
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states, _ = self.self_attn(
@@ -392,9 +392,9 @@ def patch_qwen2_add_norm():
         fused = None if nxt is None else _add_norm(residual, hidden_states, nxt)
         if fused is not None:
             total, normed = fused
-            total._solution_normed = (nxt, normed)  # taken by `nxt` when it reads `total`
+            total._solution_normed = (nxt, normed)                                        
             return total
-        FELL_BACK["addnorm"] += 1  # (also: no next norm linked, see link_next_norms)
+        FELL_BACK["addnorm"] += 1                                                    
         return residual + hidden_states
 
     forward._solution_add_norm = True
@@ -404,4 +404,4 @@ def patch_qwen2_add_norm():
     ON.add("addnorm")
 
 
-LAYER_FORWARDS = {}  # the decoder-layer forwards before/after patch_qwen2_add_norm, for tests
+LAYER_FORWARDS = {}                                                                           

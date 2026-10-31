@@ -52,10 +52,10 @@ import torch
 
 _thread = None
 _report = {}
-# Once per process: the thread, its wait at exit and before a fork; "hooks": whether launches
-# from other threads still wait for the thread (see `_wait_for_warmup`).
+                                                                                             
+                                                                        
 _state = {"started": False, "atexit": False, "at_fork": False, "hooks": False}
-_hooked = []  # the kernels carrying `_wait_for_warmup` while the thread runs
+_hooked = []                                                                 
 _hook_lock = threading.Lock()
 
 
@@ -85,7 +85,7 @@ def compile_all(kernels=None):
         fn()
         times[name] = round(time.perf_counter() - start, 3)
 
-    def norm():  # fp32 residual in, autocast dtype out; fp32 frozen weight; dx fp32
+    def norm():                                                                     
         x = torch.zeros(rows, hidden, dtype=torch.float32, device=dev)
         w = torch.ones(hidden, dtype=torch.float32, device=dev)
         y = torch.empty(rows, hidden, dtype=half, device=dev)
@@ -94,18 +94,18 @@ def compile_all(kernels=None):
         rmsnorm.launch(x, w, y, xhat, rstd, 1e-6, backward=0)
         rmsnorm.launch(x, w, y, xhat, rstd, 1e-6, backward=1)
 
-    def head():  # fp16 logits slice, int64 targets, fp32 loss/entropy/stats, int32 correctness
+    def head():                                                                                
         logits = torch.zeros(rows, 4096, dtype=torch.float16, device=dev)
         targets = torch.zeros(rows, dtype=torch.int64, device=dev)
         loss = torch.empty(rows, dtype=torch.float32, device=dev)
         entropy = torch.empty_like(loss)
         correct = torch.empty(rows, dtype=torch.int32, device=dev)
-        if fused_head.VOCAB_PATH:  # the default vocabulary-sliced head: a slice, then finalize
+        if fused_head.VOCAB_PATH:                                                              
             stats = torch.empty(rows, 5, dtype=torch.float32, device=dev)
             best = torch.empty(rows, dtype=torch.int32, device=dev)
             acc = torch.zeros(rows, hidden, dtype=torch.float32, device=dev)
-            # lm_head rows as training has them: fp16 when fp16_embed.py stores the tied
-            # embedding in fp16 (the fp16 path with its switch on), else fp32 (PEFT's upcast)
+                                                                                        
+                                                                                             
             weight = torch.zeros(1, hidden, dtype=fp16_embed.head_weight_dtype(half), device=dev)
             grad = torch.empty(rows, hidden, dtype=torch.float16, device=dev)
             fused_head.launch_vocab(rows, logits, targets, stats, best, acc, weight, grad, loss,
@@ -113,24 +113,24 @@ def compile_all(kernels=None):
                                     True, True, False)
             fused_head.launch_vocab(rows, logits, targets, stats, best, acc, weight, grad, loss,
                                     entropy, correct, 0, 0, 0, hidden, True, False, False, True)
-        else:  # SOLUTION_DISABLE_HEAD_VCHUNK=1: the token-chunked head
+        else:                                                          
             fused_head.launch_rows(logits, targets, loss, entropy, correct, True)
 
-    def mlp():  # the example's SwiGLU forward and backward (n_elements a multiple of 16)
+    def mlp():                                                                           
         gate = torch.zeros(rows, 64, dtype=half, device=dev, requires_grad=True)
         up = torch.zeros(rows, 64, dtype=half, device=dev, requires_grad=True)
         swiglu.swiglu(gate, up).backward(torch.zeros(rows, 64, dtype=half, device=dev))
 
-    def rotary():  # q [1, 12, N, 128] / k [1, 2, N, 128] fp16 views, cos/sin fp32
+    def rotary():                                                                 
         q = torch.zeros(1, rows, 12, 128, dtype=torch.float16, device=dev).transpose(1, 2)
         k = torch.zeros(1, rows, 2, 128, dtype=torch.float16, device=dev).transpose(1, 2)
         cos = torch.ones(1, rows, 128, dtype=torch.float32, device=dev)
         rope._launch(q, k, cos, cos, backward=0)
         rope._launch(q, k, cos, cos, backward=1)
 
-    def dequant():  # bitsandbytes' NF4 with double quantization: 64 and 256 per block
+    def dequant():                                                                    
         qblock, qblock2 = qgroup.WARMUP_QBLOCK, qgroup.WARMUP_QBLOCK2
-        n_rows = qgroup.ROWS  # one program: ROWS absmax blocks of qblock weights
+        n_rows = qgroup.ROWS                                                     
         packed = torch.zeros(n_rows * qblock // 2, dtype=torch.uint8, device=dev)
         absmax8 = torch.zeros(n_rows, dtype=torch.uint8, device=dev)
         code = torch.zeros(256, dtype=torch.float32, device=dev)
@@ -148,7 +148,7 @@ def compile_all(kernels=None):
     if on("fused_head"):
         timed("fused_head", head)
     timed("swiglu", mlp)
-    if half == torch.float16:  # RoPE and the grouped dequant run on the fp16 (T4) path only
+    if half == torch.float16:                                                               
         if on("rope"):
             timed("rope", rotary)
         if on("group_dequant"):
@@ -189,7 +189,7 @@ def _wait_for_warmup(*args, **kwargs):
 def _hook():
     kernels = _kernels()
     with _hook_lock:
-        if not _state["hooks"]:  # joined (or given up on) before the thread got here
+        if not _state["hooks"]:                                                      
             return
         for fn in kernels:
             if _wait_for_warmup not in fn.pre_run_hooks:
@@ -211,12 +211,12 @@ def _run(kernels):
 
     start = time.perf_counter()
     try:
-        _hook()  # before the first compile: the main thread's launches wait from here on
+        _hook()                                                                          
         _report["times"] = compile_all(kernels)
-    except BaseException as exc:  # noqa: BLE001 - reported at the join; the kernels then
-        _report["error"] = repr(exc)  # compile at their first launch, as usual
+    except BaseException as exc:                                                         
+        _report["error"] = repr(exc)                                           
     finally:
-        _unhook()  # whatever it built is loaded: nothing left to wait for
+        _unhook()                                                         
         _report["seconds"] = round(time.perf_counter() - start, 2)
     _mark("warm-up thread done")
 
@@ -236,7 +236,7 @@ def start(kernels=None):
     _thread.start()
     if not _state["atexit"]:
         _state["atexit"] = True
-        atexit.register(_finish)  # a process that never trains still waits for it before exiting
+        atexit.register(_finish)                                                                 
     if not _state["at_fork"] and hasattr(os, "register_at_fork"):
         _state["at_fork"] = True
         os.register_at_fork(before=_finish)

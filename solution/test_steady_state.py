@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a C
 VOCAB = 512
 STEPS = 5
 ROWS = 4 * STEPS
-SLACK = 64 * 1024  # bytes: the [B, T] per-token tensors of the last step differ with T
+SLACK = 64 * 1024                                                                      
 
 
 def _tokenizer():
@@ -118,8 +118,8 @@ def test_two_training_runs_leave_nothing_behind(tmp_path, monkeypatch, mlp):
     import solution
     from solution import fused_proj, host, lora, mlp_save_up, patches, unpad
 
-    monkeypatch.setenv("SOLUTION_VARLEN", "1")  # the T4's variable-length attention on any GPU
-    # the MLP forward this test needs, restored afterwards (patches are class-level)
+    monkeypatch.setenv("SOLUTION_VARLEN", "1")                                                 
+                                                                                    
     monkeypatch.setattr(modeling_qwen2.Qwen2MLP, "forward", modeling_qwen2.Qwen2MLP.forward)
     if mlp == "save_up":
         monkeypatch.setenv("SOLUTION_MLP_SAVE_UP", "1")
@@ -162,7 +162,7 @@ def test_two_training_runs_leave_nothing_behind(tmp_path, monkeypatch, mlp):
                     "row_contexts": len(unpad._rows) + len(unpad._cu)})
 
             def on_log(self, args, state, control, **kwargs):
-                # the deferred metrics were fetched just before TRL's log
+                                                                         
                 at_log.append((len(host._metric_queue), len(host._rewind_queue),
                                host._fused_token_loss[0] is None))
 
@@ -171,28 +171,28 @@ def test_two_training_runs_leave_nothing_behind(tmp_path, monkeypatch, mlp):
                            per_device_train_batch_size=4, gradient_accumulation_steps=1,
                            learning_rate=2e-4, fp16=True, logging_steps=1, save_strategy="no",
                            report_to="none", seed=1, max_length=64, completion_only_loss=True,
-                           gradient_checkpointing=False,  # as Soup sets it (TRL's default: on)
+                           gradient_checkpointing=False,                                       
                            dataloader_num_workers=0, disable_tqdm=True)
         trainer = SFTTrainer(model=model, args=config, train_dataset=dataset,
                              processing_class=tokenizer, callbacks=[Check()])
         for name, param in trainer.model.named_parameters():
-            # TRL casts QLoRA adapters to bf16; Soup casts them back to fp32 for fp16 training
-            # (soup_cli.utils.mixed_precision.align_trainable_dtype_for_fp16), as here
+                                                                                              
+                                                                                      
             if param.requires_grad and "lora_" in name and param.dtype == torch.bfloat16:
                 param.data = param.data.to(torch.float32)
         calls.update(lora=0, qkv=0, save_up=0)
         trainer.train()
         assert getattr(trainer, patches.STEP_ATTR, None) is not None, "the fused step never ran"
-        # q_proj and v_proj of every layer and step took the LoRA node, or the fused q|k|v node
-        # (fused_proj.py: one call runs both adapters) in the layers whose forward dequantizes
-        # the whole layer: all but the last of the 3 (split there, qgroup.SPLIT_LAYERS)
+                                                                                               
+                                                                                              
+                                                                                       
         assert calls["lora"] + 2 * calls["qkv"] == 2 * 3 * STEPS, calls
         assert calls["qkv"] == 2 * STEPS, calls
         assert calls["save_up"] == (3 * STEPS if mlp == "save_up" else 0), calls
         assert len(steps) == STEPS and all(s["groups"] == 3 for s in steps), "layers not packed"
         assert at_log and all(entry == (0, 0, True) for entry in at_log), at_log
         embedding = model.get_input_embeddings()
-        # fp16_embed stored the tied weight in fp16 (and must not keep the module alive)
+                                                                                        
         assert embedding.weight.dtype == torch.float16
         refs = [weakref.ref(obj) for obj in (trainer, model, model.get_base_model(), embedding)]
         refs += [weakref.ref(group) for group in _groups(model)]
@@ -212,14 +212,14 @@ def test_two_training_runs_leave_nothing_behind(tmp_path, monkeypatch, mlp):
     report = json.dumps({"runs": runs, "after_run": after_run}, indent=1)
     for steps in runs:
         for s in steps:
-            assert not s["held"] and not s["counters"], report  # every per-pass buffer dropped
-            assert s["half_bytes"] == 0, report  # the copies go with the optimizer step
+            assert not s["held"] and not s["counters"], report                                 
+            assert s["half_bytes"] == 0, report                                         
             assert s["pending"] == 0 and s["row_contexts"] == 0, report
         allocs = [s["alloc"] for s in steps]
-        assert max(allocs) - min(allocs) <= SLACK, report  # nothing grows from step to step
-    for first, second in zip(*runs):  # the second run starts from a clean state
+        assert max(allocs) - min(allocs) <= SLACK, report                                   
+    for first, second in zip(*runs):                                            
         assert abs(first["alloc"] - second["alloc"]) <= SLACK, report
-    assert abs(after_run[1] - after_run[0]) <= SLACK, report  # nothing accumulates per run
+    assert abs(after_run[1] - after_run[0]) <= SLACK, report                               
 
 
 @pytest.mark.parametrize("depth", [None, 0, 1])
@@ -263,15 +263,15 @@ def test_save_up_layer_group_trace(monkeypatch, depth):
     split = {"fwd": depth is not None and depth < 1, "bwd": depth is not None and depth < 2}
     for _ in range(3):
         trace.clear()
-        _layer_step(group, h, x, grads, save_up=True)  # asserts counters 0, caches empty
+        _layer_step(group, h, x, grads, save_up=True)                                    
         h.grad = x.grad = None
         launches = [t for t in trace if t[0] in ("all", "one")]
         expected = []
         for which in ("fwd", "bwd"):
             uses = [t for t in trace if t[0] == which]
-            assert sorted(t[1] for t in uses) == list(range(7)), (which, uses)  # 7, once each
+            assert sorted(t[1] for t in uses) == list(range(7)), (which, uses)                
             if split[which]:
-                assert all(t[2] == 0 and not t[3] for t in uses), (which, uses)  # nothing cached
+                assert all(t[2] == 0 and not t[3] for t in uses), (which, uses)                  
                 expected += [("one", t[1]) for t in uses]
             else:
                 assert [t[2] for t in uses] == [6, 5, 4, 3, 2, 1, 0], (which, uses)
@@ -333,15 +333,15 @@ def test_training_run_with_gradient_checkpointing(tmp_path):
                        logging_steps=1, save_strategy="no", report_to="none", seed=1,
                        max_length=64, completion_only_loss=True, dataloader_num_workers=0,
                        disable_tqdm=True)
-    assert config.gradient_checkpointing  # TRL's default
+    assert config.gradient_checkpointing                 
     trainer = SFTTrainer(model=model, args=config, train_dataset=_dataset(),
                          processing_class=_tokenizer(), callbacks=[Check()])
     for name, param in trainer.model.named_parameters():
         if param.requires_grad and "lora_" in name and param.dtype == torch.bfloat16:
-            param.data = param.data.to(torch.float32)  # as Soup does for fp16 training
+            param.data = param.data.to(torch.float32)                                  
     trainer.train()
-    assert model.get_base_model().model.gradient_checkpointing  # enabled by the Trainer
-    assert getattr(trainer, patches.STEP_ATTR, None) is None  # the fused path stood aside
+    assert model.get_base_model().model.gradient_checkpointing                          
+    assert getattr(trainer, patches.STEP_ATTR, None) is None                              
     assert len(steps) == 3 and all(s["groups"] == 3 and s["checkpointed"] for s in steps), steps
     assert all(not s["held"] and not s["counters"] and not s["row_contexts"] for s in steps), steps
     losses = [entry for entry in logged if "loss" in entry]

@@ -35,7 +35,7 @@ def fresh_warmup(monkeypatch):
     from solution import warmup
 
     solution.apply()
-    warmup.join()  # a thread started by an earlier apply() ends first
+    warmup.join()                                                     
     monkeypatch.setattr(warmup, "_thread", None)
     monkeypatch.setattr(warmup, "_report", {})
     monkeypatch.setitem(warmup._state, "started", False)
@@ -74,7 +74,7 @@ def _step(model, batch):
     return out.loss.detach().clone(), model.model.embed_tokens.weight.grad.clone()
 
 
-# --- apply() twice ----------------------------------------------------------------------------
+                                                                                                
 
 def _solution_layers(fn):
     """How many functions defined under solution/ are stacked in `fn` (each wrapper keeps the
@@ -145,7 +145,7 @@ def test_apply_twice_installs_nothing_twice(monkeypatch):
     monkeypatch.delenv("SOLUTION_MLP_SAVE_UP", raising=False)
     monkeypatch.setattr(modeling_qwen2.Qwen2MLP, "forward", modeling_qwen2.Qwen2MLP.forward)
     solution.apply()
-    if getattr(modeling_qwen2.Qwen2MLP.forward, "_solution_save_up", False):  # an earlier test's
+    if getattr(modeling_qwen2.Qwen2MLP.forward, "_solution_save_up", False):                     
         monkeypatch.setattr(modeling_qwen2.Qwen2MLP, "forward",
                             modeling_qwen2.Qwen2MLP.forward._previous)
     before = _patched()
@@ -177,7 +177,7 @@ def test_apply_twice_installs_nothing_twice(monkeypatch):
     warmup.join()
 
 
-# --- the warm-up thread against the main thread --------------------------------------------
+                                                                                             
 
 @cuda
 def test_main_thread_launches_while_the_warmup_builds_the_same_kernels(monkeypatch,
@@ -208,7 +208,7 @@ def test_main_thread_launches_while_the_warmup_builds_the_same_kernels(monkeypat
         loads[name] += 1
         if threading.current_thread().name == "solution-warmup":
             loading.set()
-            time.sleep(0.2)  # a slow first load: the window another thread could race into
+            time.sleep(0.2)                                                                
         return real_load(name, *args)
 
     monkeypatch.setattr(utils, "load_binary", slow_load)
@@ -217,7 +217,7 @@ def test_main_thread_launches_while_the_warmup_builds_the_same_kernels(monkeypat
     for _ in range(50):
         warmup.compile_all()
     torch.cuda.synchronize()
-    assert warmup._thread is None and not _warmup_threads_alive()  # joined at the first launch
+    assert warmup._thread is None and not _warmup_threads_alive()                              
     assert "error" not in warmup._report, warmup._report
     device = torch.cuda.current_device()
     built = {fn.fn.__name__: len(fn.device_caches[device][0]) for fn in kernels
@@ -279,14 +279,14 @@ def test_warmup_error_is_reported_at_the_join_and_kernels_compile_at_first_launc
     monkeypatch.setattr(warmup, "compile_all", boom)
     rmsnorm.rmsnorm_kernel.device_caches.clear()
     warmup.start()
-    warmup.join()  # reports, does not raise
+    warmup.join()                           
     assert "warm-up failed on purpose" in warmup._report["error"]
     assert "warm-up failed on purpose" in capsys.readouterr().out
     assert warmup._wait_for_warmup not in rmsnorm.rmsnorm_kernel.pre_run_hooks
     torch.manual_seed(7)
     x = (torch.randn(3, 50, 1536, device="cuda") * 2).requires_grad_(True)
     w = 1 + 0.1 * torch.randn(1536, device="cuda")
-    y = rmsnorm.RMSNorm.apply(x, w, 1e-6, torch.float16)  # compiles here, in this thread
+    y = rmsnorm.RMSNorm.apply(x, w, 1e-6, torch.float16)                                 
     h = x.detach().float()
     ref = (w * (h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6))).to(torch.float16)
     torch.testing.assert_close(y.float(), ref.float(), rtol=2e-3, atol=2e-3)
@@ -320,7 +320,7 @@ def test_keyboard_interrupt_during_the_first_forward_join_propagates(monkeypatch
     main = threading.main_thread().ident
 
     def interrupt():
-        time.sleep(0.5)  # the main thread is inside the join by then
+        time.sleep(0.5)                                              
         signal.pthread_kill(main, signal.SIGINT)
 
     killer = threading.Thread(target=interrupt)
@@ -337,7 +337,7 @@ def test_keyboard_interrupt_during_the_first_forward_join_propagates(monkeypatch
                for entry in info.traceback), info.traceback
     assert patches._first_forward == [True]
     assert warmup._thread is not None
-    _step(model, batch)  # joins now, then trains
+    _step(model, batch)                          
     assert warmup._thread is None and patches._first_forward == []
 
 
@@ -372,7 +372,7 @@ def test_warmup_leaves_rng_and_current_stream_alone(fresh_warmup):
     on its own default stream (the main thread's current stream is not changed)."""
     warmup = fresh_warmup
     for fn in warmup._kernels():
-        fn.device_caches.clear()  # a real compile in the thread
+        fn.device_caches.clear()                                
     torch.manual_seed(123)
     cpu, gpu = torch.get_rng_state(), torch.cuda.get_rng_state()
     side = torch.cuda.Stream()
@@ -380,8 +380,8 @@ def test_warmup_leaves_rng_and_current_stream_alone(fresh_warmup):
         warmup.start()
         warmup.join(timeout=120)
         assert torch.cuda.current_stream() == side
-    # joined, not timed out: the thread's own backward (autograd's worker thread launches the
-    # SwiGLU backward kernel for it) must not wait for the thread that waits for it
+                                                                                             
+                                                                                   
     assert warmup._thread is None and not _warmup_threads_alive()
     assert "error" not in warmup._report, warmup._report
     assert torch.equal(torch.get_rng_state(), cpu) and torch.equal(torch.cuda.get_rng_state(), gpu)
@@ -402,7 +402,7 @@ def test_fork_waits_for_the_warmup_thread(monkeypatch, fresh_warmup):
     warmup.start()
     thread = warmup._thread
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)  # "multi-threaded, use of fork()"
+        warnings.simplefilter("ignore", DeprecationWarning)                                   
         pid = os.fork()
     if pid == 0:
         os._exit(0)
@@ -411,7 +411,7 @@ def test_fork_waits_for_the_warmup_thread(monkeypatch, fresh_warmup):
     assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
 
 
-# --- apply() without CUDA -------------------------------------------------------------------
+                                                                                              
 
 NO_CUDA = """
 import torch
@@ -447,7 +447,7 @@ def test_apply_without_cuda_patches_and_falls_back():
         proc.stderr[-4000:]
 
 
-# --- global swaps and state under exceptions ------------------------------------------------
+                                                                                              
 
 @pytest.mark.parametrize("error", [ImportError("broken on purpose"), KeyboardInterrupt()])
 def test_check_swap_is_restored_when_the_import_raises(monkeypatch, error):
@@ -468,7 +468,7 @@ def test_check_swap_is_restored_when_the_import_raises(monkeypatch, error):
     monkeypatch.setitem(sys.modules, "solution_test_partial", partial)
 
     def failing(name):
-        partial.is_solution_test_available = utils.is_solution_test_available  # the stand-in
+        partial.is_solution_test_available = utils.is_solution_test_available                
         raise error
 
     with monkeypatch.context() as m:
@@ -488,7 +488,7 @@ def test_context_swaps_are_restored_when_the_block_raises():
     import importlib.metadata as metadata
 
     pytest.importorskip("transformers")
-    import transformers.utils.import_utils  # noqa: F401 - the mapping the swap shares
+    import transformers.utils.import_utils                                            
 
     from solution import startup
 
@@ -551,7 +551,7 @@ def test_lora_backward_restores_the_rng_state_when_the_replay_raises(monkeypatch
         raise RuntimeError("replay failed on purpose")
 
     torch.cuda.manual_seed(99)
-    torch.randn(5, device="cuda")  # the generator somewhere else than at the forward
+    torch.randn(5, device="cuda")                                                    
     before = torch.cuda.get_rng_state()
     monkeypatch.setattr(torch, "native_dropout", failing)
     with pytest.raises(RuntimeError, match="replay failed on purpose"):

@@ -15,7 +15,7 @@ def test_startup_table_names_exist():
         assert switch.startswith("SOLUTION_DISABLE_") and callable(getattr(startup, name))
 
 
-# 1. Shared package mapping ----------------------------------------------------------------------
+                                                                                                  
 
 def test_shared_package_mapping_is_the_real_mapping():
     import importlib.metadata as metadata
@@ -30,8 +30,8 @@ def test_shared_package_mapping_is_the_real_mapping():
         assert metadata.packages_distributions is not real
     assert metadata.packages_distributions is real
     assert inside == import_utils.PACKAGE_DISTRIBUTION_MAPPING
-    assert inside == real()  # nothing was installed since transformers computed it
-    inside["solution-test"] = ["x"]  # a copy: the shared mapping is not touched
+    assert inside == real()                                                        
+    inside["solution-test"] = ["x"]                                             
     assert "solution-test" not in import_utils.PACKAGE_DISTRIBUTION_MAPPING
 
 
@@ -40,7 +40,7 @@ def test_import_trl_is_a_noop_when_loaded():
         assert startup.import_trl() is False
 
 
-# 2. Tokenizer digest for dataset fingerprints ---------------------------------------------------
+                                                                                                  
 
 def _fake_tokenizer(cls, n, shift=0):
     tok = object.__new__(cls)
@@ -57,7 +57,7 @@ def _fake_tokenizer_class():
     transformers = pytest.importorskip("transformers")
 
     class FakeTokenizer(transformers.PreTrainedTokenizerBase):
-        def __repr__(self):  # datasets' reducer formats the tokenizer for its log
+        def __repr__(self):                                                       
             return "FakeTokenizer()"
 
     return FakeTokenizer
@@ -72,14 +72,14 @@ def test_tokenizer_fingerprint_is_a_content_digest():
     big = _fake_tokenizer(FakeTokenizer, 5000)
     vocab, merges = big._vocab, big._merges
     first = Hasher.hash(big)
-    assert big._vocab is vocab and big._merges is merges  # state restored after hashing
-    same = _fake_tokenizer(FakeTokenizer, 5000)  # equal content, other objects
+    assert big._vocab is vocab and big._merges is merges                                
+    same = _fake_tokenizer(FakeTokenizer, 5000)                                
     assert Hasher.hash(same) == first
     assert Hasher.hash(_fake_tokenizer(FakeTokenizer, 5000, shift=1)) != first
     other = _fake_tokenizer(FakeTokenizer, 5000)
-    other._merges = other._merges[::-1]  # merge order matters
+    other._merges = other._merges[::-1]                       
     assert Hasher.hash(other) != first
-    # small tokenizers are pickled by datasets' own reducer, unchanged
+                                                                      
     from datasets.utils import _dill
 
     original, patched = startup._state["tokenizer_reducer"]
@@ -106,7 +106,7 @@ def test_map_with_patched_fingerprint_gives_the_same_rows():
     assert out.to_list() == [{"ids": [1, 2, 4999, -1]}, {"ids": [0]}]
 
 
-# 3. Deferred torch.compile in bitsandbytes ------------------------------------------------------
+                                                                                                  
 
 def test_deferred_compile_builds_on_first_call(monkeypatch):
     calls = []
@@ -124,14 +124,14 @@ def test_deferred_compile_builds_on_first_call(monkeypatch):
         wrapped = torch.compile(square, dynamic=False)
         decorated = torch.compile(dynamic=True)(square)
         module = torch.nn.Linear(2, 2)
-        compiled_module = torch.compile(module)  # modules go straight to the real compile
-    assert torch.compile is fake_compile  # restored
-    assert calls == [{}]  # only the module was compiled at once
+        compiled_module = torch.compile(module)                                           
+    assert torch.compile is fake_compile            
+    assert calls == [{}]                                        
     assert wrapped.__name__ == "square" and decorated.__name__ == "square"
     assert wrapped(3) == ("compiled", 9)
     assert decorated(4) == ("compiled", 16)
     assert wrapped(5) == ("compiled", 25)
-    assert calls == [{}, {"dynamic": False}, {"dynamic": True}]  # built once each, on first call
+    assert calls == [{}, {"dynamic": False}, {"dynamic": True}]                                  
     assert compiled_module(torch.ones(2))[0] == "compiled"
 
 
@@ -148,7 +148,7 @@ def test_import_bitsandbytes_is_a_noop_when_loaded():
         assert startup.import_bitsandbytes() is False
 
 
-# 4. scikit-learn deferred -----------------------------------------------------------------------
+                                                                                                  
 
 def test_lazy_callable_imports_on_first_call():
     import math
@@ -180,12 +180,12 @@ def test_import_without_sklearn_defers_and_restores(tmp_path, monkeypatch):
     assert startup._import_without_sklearn("solution_fake_importer",
                                            {"score": "solution_fake_heavy"})
     module = sys.modules["solution_fake_importer"]
-    assert "solution_fake_heavy" not in sys.modules  # the heavy import did not happen
-    assert utils.is_sklearn_available is installed  # the global check is restored
-    assert module.is_sklearn_available is installed  # and the module's own reference
-    assert module.score(4, 2) == 42  # the lazy name imports and calls the real function
+    assert "solution_fake_heavy" not in sys.modules                                   
+    assert utils.is_sklearn_available is installed                                
+    assert module.is_sklearn_available is installed                                  
+    assert module.score(4, 2) == 42                                                     
     assert "solution_fake_heavy" in sys.modules
-    assert startup._import_without_sklearn("solution_fake_importer", {}) is False  # loaded
+    assert startup._import_without_sklearn("solution_fake_importer", {}) is False          
 
 
 def test_transformers_modules_keep_the_real_sklearn_check():
@@ -193,13 +193,13 @@ def test_transformers_modules_keep_the_real_sklearn_check():
     from transformers.generation import candidate_generator as cg
     from transformers.utils import import_utils
 
-    # whichever way the module was imported, its run-time check is transformers' own
+                                                                                    
     assert cg.is_sklearn_available is import_utils.is_sklearn_available
     if import_utils.is_sklearn_available():
         assert callable(cg.roc_curve)
 
 
-# 6. SciPy deferred in the object-detection losses -----------------------------------------------
+                                                                                                  
 
 def test_import_with_scipy_check_off_defers_and_restores(tmp_path, monkeypatch):
     """A module shaped like transformers' DETR losses, with a stand-in for scipy.optimize."""
@@ -240,7 +240,7 @@ def test_scipy_table_covers_every_transformers_loss():
     found = {}
     for path in sorted((pathlib.Path(transformers.__file__).parent / "loss").glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in tree.body:  # module level only: function-level imports run on call
+        for node in tree.body:                                                         
             if isinstance(node, ast.If):
                 for inner in ast.walk(node):
                     if isinstance(inner, ast.ImportFrom) and (inner.module or "").startswith("scipy"):
@@ -249,7 +249,7 @@ def test_scipy_table_covers_every_transformers_loss():
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 names = [node.module or ""] if isinstance(node, ast.ImportFrom) else \
                     [alias.name for alias in node.names]
-                assert not any(n.startswith("scipy") for n in names), path  # unconditional import
+                assert not any(n.startswith("scipy") for n in names), path                        
     assert found == startup.SCIPY_IMPORTERS
 
 
@@ -266,7 +266,7 @@ def test_transformers_losses_keep_the_real_scipy_check():
             assert all(callable(getattr(module, attr)) for attr in names)
 
 
-# 7. boto3 deferred in accelerate ----------------------------------------------------------------
+                                                                                                  
 
 def test_lazy_module_imports_on_first_use():
     import json
@@ -275,7 +275,7 @@ def test_lazy_module_imports_on_first_use():
     owner = types.SimpleNamespace()
     owner.json = startup._LazyModule("json", owner)
     assert owner.json.dumps([1]) == json.dumps([1])
-    assert owner.json is json  # replaced by the real module after the first use
+    assert owner.json is json                                                   
 
 
 def test_import_accelerate_without_boto3_in_a_fresh_process(tmp_path):
@@ -288,7 +288,7 @@ def test_import_accelerate_without_boto3_in_a_fresh_process(tmp_path):
     (tmp_path / "boto3").mkdir()
     (tmp_path / "boto3" / "__init__.py").write_text(
         "def client(name):\n    return ('client', name)\n")
-    (tmp_path / "boto3-0.0.0.dist-info").mkdir()  # an installed distribution for importlib
+    (tmp_path / "boto3-0.0.0.dist-info").mkdir()                                           
     (tmp_path / "boto3-0.0.0.dist-info" / "METADATA").write_text(
         "Metadata-Version: 2.1\nName: boto3\nVersion: 0.0.0\n")
     repo = pathlib.Path(__file__).resolve().parents[1]
@@ -312,7 +312,7 @@ def test_import_accelerate_without_boto3_in_a_fresh_process(tmp_path):
     assert proc.returncode == 0 and "ok" in proc.stdout, proc.stdout + proc.stderr
 
 
-# 8. Import-time objects out of the collector's scans --------------------------------------------
+                                                                                                  
 
 def test_freeze_gc_keeps_collecting_new_garbage():
     import gc
@@ -327,14 +327,14 @@ def test_freeze_gc_keeps_collecting_new_garbage():
             pass
 
         a, b = Node(), Node()
-        a.other, b.other = b, a  # a reference cycle created after the freeze
+        a.other, b.other = b, a                                              
         ref = weakref.ref(a)
         del a, b
         gc.collect()
-        assert ref() is None  # still collected
+        assert ref() is None                   
     finally:
         if before == 0:
-            gc.unfreeze()  # leave the test process as it was
+            gc.unfreeze()                                    
 
 
 def test_freeze_gc_does_nothing_when_disabled():
@@ -351,7 +351,7 @@ def test_freeze_gc_does_nothing_when_disabled():
         gc.enable()
 
 
-# 9. One nvidia-smi query per process ------------------------------------------------------------
+                                                                                                  
 
 def test_share_gpu_query_runs_the_query_once(monkeypatch):
     pytest.importorskip("accelerate")
@@ -362,7 +362,7 @@ def test_share_gpu_query_runs_the_query_once(monkeypatch):
     def fake_get_gpu_info():
         calls.append(1)
         if len(calls) == 1:
-            raise RuntimeError("nvidia-smi failed")  # a failure is not remembered
+            raise RuntimeError("nvidia-smi failed")                               
         return ["Tesla T4", "Tesla T4"], 2
 
     monkeypatch.setattr(environment, "get_gpu_info", fake_get_gpu_info)
@@ -372,15 +372,15 @@ def test_share_gpu_query_runs_the_query_once(monkeypatch):
     with pytest.raises(RuntimeError):
         shared()
     first = shared()
-    first[0].append("changed by a caller")  # callers get copies
+    first[0].append("changed by a caller")                      
     assert shared() == (["Tesla T4", "Tesla T4"], 2)
     assert len(calls) == 2
-    # accelerate's P2P check reads the module attribute at call time: same answer, no query
+                                                                                           
     assert environment.check_cuda_p2p_ib_support() is True
     assert len(calls) == 2
 
 
-# 10. One NF4 code table per device --------------------------------------------------------------
+                                                                                                  
 
 def test_share_4bit_code_equals_bitsandbytes_tables():
     pytest.importorskip("bitsandbytes")
@@ -394,21 +394,21 @@ def test_share_4bit_code_equals_bitsandbytes_tables():
         for name in ("nf4", "fp4", "af4"):
             first, second = shared(name, device=device), shared(name, device=device)
             want = original(name, device=device)
-            assert first.data_ptr() != second.data_ptr()  # each call gets its own tensor
+            assert first.data_ptr() != second.data_ptr()                                 
             for got in (first, second):
                 assert got.device == want.device and got.dtype == want.dtype
                 assert torch.equal(got.view(torch.int32), want.view(torch.int32))
-            first.mul_(0)  # a caller writing into its table does not touch the next one
+            first.mul_(0)                                                               
             assert torch.equal(shared(name, device=device), want)
     with pytest.raises(NotImplementedError):
         shared("nf3")
     with pytest.raises(NotImplementedError):
         shared("af4", blocksize=128)
-    with pytest.raises(RuntimeError):  # bitsandbytes' own int4 table fails the same way
+    with pytest.raises(RuntimeError):                                                   
         shared("int4", device="cpu")
 
 
-# 11. One render per conversation ----------------------------------------------------------------
+                                                                                                  
 
 class _FakeChatTokenizer:
     """Renders a conversation deterministically, counts the renders; no generation block in
@@ -435,7 +435,7 @@ class _FakeChatTokenizer:
         if return_dict:
             out = {"input_ids": ids}
             if return_assistant_tokens_mask:
-                out["assistant_masks"] = [0] * len(ids)  # no generation block: all zeros
+                out["assistant_masks"] = [0] * len(ids)                                  
             return out
         return ids
 
@@ -446,7 +446,7 @@ _CONVERSATIONS = [
      {"role": "assistant", "content": "hello"}],
     [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
      {"role": "user", "content": "c"}, {"role": "assistant", "content": "d"}],
-    [{"role": "user", "content": "no answer yet"}],  # no assistant turn: the mask path is kept
+    [{"role": "user", "content": "no answer yet"}],                                            
 ]
 
 
@@ -457,7 +457,7 @@ def test_share_chat_renders_gives_the_same_labels_with_fewer_renders():
     assert startup.share_chat_renders()
     patched = loss_mask.build_assistant_only_labels
     assert sft_format.build_assistant_only_labels is patched
-    original = patched._original  # unpatched logic (the helpers pass through outside a call)
+    original = patched._original                                                             
     for kwargs in ({}, {"include_eot": True}, {"mask_history": True}, {"max_length": 5}):
         ref_tok, new_tok = _FakeChatTokenizer(), _FakeChatTokenizer()
         for messages in _CONVERSATIONS * 2:
@@ -465,10 +465,10 @@ def test_share_chat_renders_gives_the_same_labels_with_fewer_renders():
             got = patched(messages, new_tok, **kwargs)
             assert got == want
         assert len(new_tok.calls) < len(ref_tok.calls)
-        # the mask attempt is made for real for the conversation without an assistant turn
-        # every time (2), and once more the first time in the process
+                                                                                          
+                                                                     
         assert 2 <= sum(1 for _, mask in new_tok.calls if mask) <= 3
-    assert startup._render_state["active"] is None  # no state left outside a call
+    assert startup._render_state["active"] is None                                
 
 
 def test_share_chat_renders_real_tokenizer_and_rows():
@@ -483,7 +483,7 @@ def test_share_chat_renders_real_tokenizer_and_rows():
     try:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             "Qwen/Qwen2.5-1.5B-Instruct", local_files_only=True)
-    except Exception:  # noqa: BLE001 - not downloaded here
+    except Exception:                                      
         pytest.skip("Qwen tokenizer not in the local cache")
     path = pathlib.Path(__file__).resolve().parents[1] / "data" / "train.jsonl"
     if not path.exists():
@@ -517,7 +517,7 @@ def test_share_chat_renders_real_tokenizer_and_rows():
     assert n_new <= n_ref // 2 + 1
 
 
-# 5. Checkpoint conversion on the GPU ------------------------------------------------------------
+                                                                                                  
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 @pytest.mark.parametrize("src, dst", [(torch.bfloat16, torch.float16),
@@ -534,8 +534,8 @@ def test_gpu_conversion_equals_cpu_conversion(src, dst):
     else:
         bits = torch.arange(-2**15, 2**15, dtype=torch.int32).to(torch.int16)
     values = bits.view(src)
-    cpu = values.to(device="cuda", dtype=dst).cpu()  # the blocking copy: converts on the CPU
-    gpu = values.to(device="cuda").to(dtype=dst).cpu()  # the patched path
+    cpu = values.to(device="cuda", dtype=dst).cpu()                                          
+    gpu = values.to(device="cuda").to(dtype=dst).cpu()                    
     width = torch.int16 if dst == torch.float16 else torch.int32
     nan = torch.isnan(values.float())
     assert torch.equal(torch.isnan(cpu), nan) and torch.equal(torch.isnan(gpu), nan)
@@ -557,8 +557,8 @@ def test_materialize_copy_patch_matches_the_original():
         out = patched(tensor, "cuda:0", torch.float16)
         assert out.device.type == "cuda" and out.dtype == torch.float16
         assert torch.equal(out.cpu(), tensor.to(torch.float16))
-    out = patched(tensor, "cpu", torch.float32)  # not a host-to-device copy: as before
+    out = patched(tensor, "cpu", torch.float32)                                        
     assert torch.equal(out, tensor.to(torch.float32))
     assert patched(tensor, None, None) is not None
     if original is not None:
-        loading._materialize_copy = original  # leave the module as the test found it
+        loading._materialize_copy = original                                         

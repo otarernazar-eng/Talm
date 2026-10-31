@@ -18,7 +18,7 @@ def _fp16_values(rows, cols, seed):
     """fp16 weights with the awkward cases in them: subnormals, signed zeros, large values."""
     gen = torch.Generator(device="cuda").manual_seed(seed)
     w = (torch.randn(rows, cols, device="cuda", generator=gen) * 0.05).half()
-    w[0, :4] = torch.tensor([0.0, -0.0, 6.0e-8, -3.0e-5], dtype=torch.float16)  # zeros, subnormals
+    w[0, :4] = torch.tensor([0.0, -0.0, 6.0e-8, -3.0e-5], dtype=torch.float16)                     
     w[1, :2] = torch.tensor([65504.0, -1024.5], dtype=torch.float16)
     return w
 
@@ -52,18 +52,18 @@ def test_store_fp16_keeps_the_values_the_tie_and_the_fp32_lookup():
     from solution import fp16_embed
 
     w16 = _fp16_values(5000, 192, seed=1)
-    reference = _TiedToy(w16.float())  # PEFT's upcast: fp32 copies of the fp16 values
+    reference = _TiedToy(w16.float())                                                 
     toy = _TiedToy(w16.float().clone())
     param = toy.embed.weight
     ids = torch.randint(0, 5000, (3, 257), device="cuda")
-    ids[0, :6] = torch.tensor([0, 1, 3, 3, 4999, 0])  # repeats, the padding row, the edges
+    ids[0, :6] = torch.tensor([0, 1, 3, 3, 4999, 0])                                       
     torch.cuda.synchronize()
     before = torch.cuda.memory_allocated()
     saved = fp16_embed.store_fp16(toy)
     torch.cuda.synchronize()
     assert saved == pytest.approx(5000 * 192 * 2 / 2**20)
-    assert before - torch.cuda.memory_allocated() >= 5000 * 192 * 2  # the fp32 storage is gone
-    assert toy.embed.weight is param and toy.head.weight is param  # one Parameter, still tied
+    assert before - torch.cuda.memory_allocated() >= 5000 * 192 * 2                            
+    assert toy.embed.weight is param and toy.head.weight is param                             
     assert param.dtype == torch.float16 and not param.requires_grad
     assert torch.equal(_bits(param.float()), _bits(reference.embed.weight))
     for autocast in (False, True):
@@ -71,7 +71,7 @@ def test_store_fp16_keeps_the_values_the_tie_and_the_fp32_lookup():
             ours, ref = toy.embed(ids), reference.embed(ids)
         assert ours.dtype == ref.dtype == torch.float32
         assert torch.equal(_bits(ours), _bits(ref))
-    # under autocast the output head computes from the same fp16 values as from the fp32 weight
+                                                                                               
     hidden = torch.randn(64, 192, device="cuda")
     with torch.autocast("cuda", dtype=torch.float16):
         assert torch.equal(toy.head(hidden), reference.head(hidden))
@@ -108,11 +108,11 @@ def test_store_fp16_leaves_everything_else_alone():
 
 
 @pytest.mark.parametrize("path,hidden_dtype,n_tokens,vocab,vocab_chunk,compact", [
-    ("vocab", torch.float16, 1427, 151936, None, True),   # the task's sizes and default path
+    ("vocab", torch.float16, 1427, 151936, None, True),                                      
     ("vocab", torch.float16, 1427, 151936, None, False),
     ("vocab", torch.float32, 1427, 151936, None, True),
     ("tokens", torch.float16, 1427, 151936, None, True),
-    ("vocab", torch.float16, 37, 4100, 1028, True),       # a last slice of another width
+    ("vocab", torch.float16, 37, 4100, 1028, True),                                      
     ("tokens", torch.float32, 37, 4100, None, True),
     ("vocab", torch.float32, 300, 1000, 384, True),
     ("tokens", torch.float16, 300, 1000, None, True)])
@@ -171,7 +171,7 @@ def test_fused_head_needs_no_slice_buffer_for_the_fp16_weight():
         copies[name] = sum(e.count for e in prof.key_averages()
                            if e.device_type == DeviceType.CUDA and "copy" in e.key.lower())
         del loss
-    assert copies["fp32"] - copies["fp16"] == -(-vocab // VOCAB_CHUNK)  # one cast per slice
+    assert copies["fp32"] - copies["fp16"] == -(-vocab // VOCAB_CHUNK)                      
     assert transient["fp32"] - transient["fp16"] >= VOCAB_CHUNK * size * 2
 
 
@@ -187,7 +187,7 @@ def _tiny_checkpoint(path):
     torch.manual_seed(41)
     model = Qwen2ForCausalLM(config)
     with torch.no_grad():
-        for param in model.parameters():  # trained-looking scales, not the init's
+        for param in model.parameters():                                          
             param.normal_(0, 0.08)
     model.to(torch.bfloat16).save_pretrained(path)
 
@@ -211,7 +211,7 @@ def _qlora_model(path, prepare):
     torch.manual_seed(43)
     with torch.no_grad():
         for name, param in model.named_parameters():
-            if "lora_B" in name:  # PEFT starts B at 0: give the adapter a non-zero output
+            if "lora_B" in name:                                                          
                 param.normal_(0, 0.05)
     return model
 
@@ -238,7 +238,7 @@ def test_qlora_step_is_bit_identical_with_the_patched_prepare(tmp_path):
     for name, model in models.items():
         base = model.get_base_model()
         weight = base.get_input_embeddings().weight
-        assert base.get_output_embeddings().weight is weight  # tied
+        assert base.get_output_embeddings().weight is weight        
         assert not weight.requires_grad
         weights[name] = weight
     assert weights["fp32"].dtype == torch.float32 and weights["fp16"].dtype == torch.float16
@@ -246,8 +246,8 @@ def test_qlora_step_is_bit_identical_with_the_patched_prepare(tmp_path):
     dtypes = {name: {n: p.dtype for n, p in model.named_parameters()}
               for name, model in models.items()}
     differs = [n for n in dtypes["fp32"] if dtypes["fp32"][n] != dtypes["fp16"][n]]
-    assert differs == ["base_model.model.model.embed_tokens.weight"]  # nothing else changed
-    assert models["fp16"].get_base_model().dtype == torch.float16  # transformers' model.dtype
+    assert differs == ["base_model.model.model.embed_tokens.weight"]                        
+    assert models["fp16"].get_base_model().dtype == torch.float16                             
     trainable = {name: [(n, p.dtype, tuple(p.shape)) for n, p in model.named_parameters()
                         if p.requires_grad] for name, model in models.items()}
     assert trainable["fp32"] == trainable["fp16"]
@@ -265,11 +265,11 @@ def test_qlora_step_is_bit_identical_with_the_patched_prepare(tmp_path):
     results = {}
     for name, model in models.items():
         model.train()
-        torch.manual_seed(45)  # the LoRA dropout masks
+        torch.manual_seed(45)                          
         embeds = model.get_base_model().get_input_embeddings()(input_ids)
         with torch.autocast("cuda", dtype=torch.float16):
             out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-        assert out.logits is None  # the fused head ran
+        assert out.logits is None                      
         out.loss.backward()
         grads = {n: p.grad.clone() for n, p in model.named_parameters() if p.requires_grad}
         model.eval()
@@ -279,7 +279,7 @@ def test_qlora_step_is_bit_identical_with_the_patched_prepare(tmp_path):
     (e32, loss32, g32, l32), (e16, loss16, g16, l16) = results["fp32"], results["fp16"]
     assert e32.dtype == e16.dtype == torch.float32 and torch.equal(_bits(e32), _bits(e16))
     assert torch.equal(loss32, loss16)
-    assert g32.keys() == g16.keys() and len(g32) == 8  # q/v A/B in two layers
+    assert g32.keys() == g16.keys() and len(g32) == 8                         
     for n in g32:
         assert torch.equal(g32[n], g16[n]), n
     assert torch.equal(l32, l16)
@@ -298,7 +298,7 @@ def test_head_weight_dtype_follows_the_switch_and_the_path(monkeypatch):
 
     monkeypatch.delenv("SOLUTION_DISABLE_FP16_EMBED", raising=False)
     assert fp16_embed.head_weight_dtype(torch.float16) == torch.float16
-    assert fp16_embed.head_weight_dtype(torch.bfloat16) == torch.float32  # bf16 GPUs: untouched
+    assert fp16_embed.head_weight_dtype(torch.bfloat16) == torch.float32                        
     monkeypatch.setenv("SOLUTION_DISABLE_FP16_EMBED", "1")
     assert fp16_embed.head_weight_dtype(torch.float16) == torch.float32
 
@@ -313,13 +313,13 @@ def test_switch_leaves_peft_alone(monkeypatch):
     from solution import fp16_embed
 
     monkeypatch.setenv("SOLUTION_WARMUP_THREAD", "0")
-    monkeypatch.setenv("SOLUTION_DISABLE_STARTUP", "1")  # gc.freeze included
+    monkeypatch.setenv("SOLUTION_DISABLE_STARTUP", "1")                      
     namespaces = (peft, peft.utils, peft.utils.other)
     solution.apply()
     wrapped = peft.prepare_model_for_kbit_training
     assert getattr(wrapped, "_solution_fp16_embed", False)
     assert all(ns.prepare_model_for_kbit_training is wrapped for ns in namespaces)
-    assert fp16_embed.patch_prepare_model_for_kbit_training() is True  # no second wrapper
+    assert fp16_embed.patch_prepare_model_for_kbit_training() is True                     
     assert peft.prepare_model_for_kbit_training is wrapped
     for ns in namespaces:
         monkeypatch.setattr(ns, "prepare_model_for_kbit_training", wrapped._original)

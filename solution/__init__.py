@@ -107,13 +107,13 @@ _t0 = time.perf_counter()
 
 
 def _mark(label):
-    # One write per line (print() writes the text and the newline separately): the warm-up
-    # thread prints too, and two threads' lines must not interleave.
+                                                                                          
+                                                                    
     print(f"[solution] {label} at {time.perf_counter() - _t0:.2f} s\n", end="", flush=True)
 
 
 _lap_t = [_t0]
-_exit_mark = []  # the "process exit" mark is registered (once per process)
+_exit_mark = []                                                            
 
 
 def _in_chain(fn, marker):
@@ -142,9 +142,9 @@ def _warmup_mode():
     return os.environ.get("SOLUTION_WARMUP_THREAD", "1")
 
 
-# Outside the training loop (startup.py): work the run pays for and never uses. One row per
-# patch: the switch that turns it off, the function in startup.py, a label for the log. The
-# order matters: each import here would otherwise happen inside a later one.
+                                                                                           
+                                                                                           
+                                                                            
 STARTUP = (
     ("SOLUTION_DISABLE_LAZY_BOTO3", "import_accelerate_without_boto3", "accelerate w/o boto3"),
     ("SOLUTION_DISABLE_LAZY_COMPILE", "import_bitsandbytes", "bnb, deferred torch.compile"),
@@ -207,7 +207,7 @@ def _compiler_startup(warm, kernels):
     from .state import installing
 
     if os.environ.get("SOLUTION_FAST_TRITON_BUILD") != "0":
-        # Triton's C launcher / cuda_utils builds at -O0 instead of -O3 (triton_build.py).
+                                                                                          
         with installing("triton_build"):
             from . import triton_build
             from .engaged import TEXT
@@ -217,9 +217,9 @@ def _compiler_startup(warm, kernels):
             _mark(f"Triton C helper builds at {triton_build.OPT_LEVEL}: "
                   f"{'on' if installed else 'OFF'}")
     if warm not in ("0", "late"):
-        # The step's kernels compile in a thread of this process while Soup starts up and loads
-        # the model (warmup.py; SOLUTION_WARMUP_THREAD=0 switches it off). Started first, so it
-        # also overlaps the imports below.
+                                                                                               
+                                                                                               
+                                          
         with installing("warmup"):
             from . import warmup
 
@@ -244,8 +244,8 @@ def apply():
     warm = _warmup_mode()
     recompute = os.environ.get("SOLUTION_MLP_RECOMPUTE") == "1"
     group = os.environ.get("SOLUTION_DISABLE_GROUP") != "1" and not recompute
-    # Our kernel groups the training step launches, by the switches read here once: the patches
-    # below install them, and the warm-up thread compiles the same ones.
+                                                                                               
+                                                                        
     kernels = {"rmsnorm": os.environ.get("SOLUTION_DISABLE_RMSNORM") != "1",
                "rope": os.environ.get("SOLUTION_DISABLE_ROPE") != "1",
                "group_dequant": group,
@@ -262,31 +262,31 @@ def apply():
         from .swiglu import patch_qwen2_mlp
 
         if not _in_chain(modeling_qwen2.Qwen2MLP.forward, "_solution_example"):
-            patch_qwen2_mlp()  # the example: works out of the box, not our own kernel
-            modeling_qwen2.Qwen2MLP.forward._solution_example = True  # its wrapper, `_in_chain`
+            patch_qwen2_mlp()                                                         
+            modeling_qwen2.Qwen2MLP.forward._solution_example = True                            
         _lap("swiglu patch (imports triton, transformers' qwen2)")
 
     if os.environ.get("SOLUTION_DISABLE_SWIGLU_INPLACE") != "1":
         with installing("swiglu"):
             from .swiglu_inplace import patch_qwen2_mlp_inplace
 
-            patch_qwen2_mlp_inplace()  # the example's kernels, its backward written over gate/up
+            patch_qwen2_mlp_inplace()                                                            
 
     if os.environ.get("SOLUTION_MLP_SAVE_UP") == "1":
-        # Opt-in: the MLP keeps up and its input, gate is recomputed in the backward from the
-        # layer's dequantized weight (one extra GEMM per layer; mlp_save_up.py).
+                                                                                             
+                                                                                
         with installing("mlp_save_up"):
             from .mlp_save_up import patch_qwen2_mlp_save_up
 
             patch_qwen2_mlp_save_up()
 
     if recompute:
-        # Opt-in: about -1.2 GiB at the peak for about +25% training-loop time (measured);
-        # the scoring is a log ratio to the best team on each axis, so speed is the default.
+                                                                                          
+                                                                                            
         with installing("mlp_recompute"):
             from .mlp_recompute import patch_qwen2_mlp_recompute
 
-            patch_qwen2_mlp_recompute()  # on top of the example: saves only the MLP input
+            patch_qwen2_mlp_recompute()                                                   
 
     if kernels["rmsnorm"]:
         with installing("rmsnorm"):
@@ -294,8 +294,8 @@ def apply():
 
             patch_qwen2_rmsnorm()
         if os.environ.get("SOLUTION_DISABLE_ADDNORM") != "1":
-            # every residual add inside the kernel of the norm that reads it (installed before
-            # the per-layer dequant wrapper below, which wraps this layer forward)
+                                                                                              
+                                                                                  
             with installing("addnorm"):
                 from .rmsnorm import patch_qwen2_add_norm
 
@@ -310,8 +310,8 @@ def apply():
 
     fused_linear = False
     if os.environ.get("SOLUTION_QLINEAR") == "1":
-        # Opt-in experiment: measured neutral on the T4 (the step is not bound by bitsandbytes'
-        # Python dispatch); the bit-exact dequant drop-in below is the default.
+                                                                                               
+                                                                               
         with installing("qlinear"):
             from .qlinear import patch_bnb_linear4bit
 
@@ -320,7 +320,7 @@ def apply():
 
     dequant = not fused_linear and os.environ.get("SOLUTION_DISABLE_DEQUANT") != "1"
     if dequant and not group:
-        # bitsandbytes' own dispatch with our dequant kernel for every 4-bit projection.
+                                                                                        
         with installing("nf4_dequant"):
             from .nf4_dequant import patch_bnb_dequant
 
@@ -329,9 +329,9 @@ def apply():
             _mark(f"nf4 dequant patch {'on' if patched else 'OFF'}")
 
     if group:
-        # One dequant launch per layer and pass (7 projections at once) instead of 389 per step.
-        # Our per-projection dequant (nf4_dequant.py) is installed only if a layer cannot be
-        # packed (qgroup.setup_layer); in this task none is, so its kernel is never compiled.
+                                                                                                
+                                                                                            
+                                                                                             
         with installing("qgroup"):
             from . import qgroup
 
@@ -340,24 +340,24 @@ def apply():
             _lap("group dequant patch (imports bitsandbytes)")
 
         if os.environ.get("SOLUTION_DISABLE_LORA") != "1":
-            # The packed q/v projections and their adapter as one autograd node: PEFT's ops,
-            # bit-identical, but only the layer input kept for the backward (the dropout is
-            # replayed there); PEFT's path everywhere else.
+                                                                                            
+                                                                                           
+                                                           
             with installing("lora"):
                 from .lora import patch_peft_lora
 
                 patch_peft_lora()
 
         if os.environ.get("SOLUTION_DISABLE_FUSED_PROJ") != "1":
-            # q|k|v and gate|up, adjacent in the packed buffer, as one GEMM each forward and
-            # backward (fused_proj.py); per call, the previous path outside that situation.
+                                                                                            
+                                                                                           
             if os.environ.get("SOLUTION_DISABLE_FUSED_QKV") != "1":
                 with installing("fused_proj"):
                     from .fused_proj import patch_qwen2_attention
 
                     patch_qwen2_attention()
             if os.environ.get("SOLUTION_FUSED_MLP") == "1":
-                # opt-in: the transposed gate|up GEMM measured slower on the T4 (fused_proj.py)
+                                                                                               
                 with installing("fused_mlp"):
                     from .fused_proj import patch_qwen2_mlp
 
@@ -366,15 +366,15 @@ def apply():
     with installing("fp16_embed"):
         from . import fp16_embed
 
-        if fp16_embed.enabled():  # SOLUTION_DISABLE_FP16_EMBED, also read there by the warm-up
-            # The frozen tied embedding / lm_head weight back in fp16 right after PEFT's fp32
-            # upcast (the same values, bitwise; lookups still return fp32): -445 MiB at the peak.
+        if fp16_embed.enabled():                                                               
+                                                                                             
+                                                                                                 
             _mark("fp16 tied embedding patch "
                   f"{'on' if fp16_embed.patch_prepare_model_for_kbit_training() else 'OFF'}")
 
     if kernels["fused_head"]:
-        # (a compute_loss patch that fails to install leaves the fused forward off too: TRL's
-        # own compute_loss needs the logits)
+                                                                                             
+                                            
         with installing("fused_head"):
             from .patches import patch_qwen2_causal_lm, patch_sft_compute_loss
             from .unpad import patch_sdpa_rows
@@ -384,13 +384,13 @@ def apply():
             _lap("causal LM + sdpa patches")
             try:
                 patch_sft_compute_loss()
-            except ImportError:  # no trl in this process (some regression tests): nothing to do
+            except ImportError:                                                                 
                 pass
             else:
                 _patch_host()
             _lap("SFTTrainer.compute_loss + host patches (imports trl)")
     if warm == "late":
-        # For comparison: the same warm-up thread started after the imports above.
+                                                                                  
         with installing("warmup"):
             from . import warmup
 
@@ -398,11 +398,11 @@ def apply():
     if freeze:
         _freeze_gc("end")
     _mark("apply done")
-    if not _exit_mark:  # once per process, however often apply() runs (the tests call it a lot)
+    if not _exit_mark:                                                                          
         _exit_mark.append(True)
         atexit.register(_mark, "process exit")
     from . import engaged
 
-    # `[solution] engaged: ...`: which fast paths ran and how often (engaged.py), after the
-    # first training step and at exit (registered after the mark above, so printed before it).
+                                                                                           
+                                                                                              
     engaged.install()

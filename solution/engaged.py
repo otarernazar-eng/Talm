@@ -62,18 +62,18 @@ switch or because what it runs inside is off).
 import collections
 import sys
 
-RAN = collections.defaultdict(int)        # component -> times its fast path ran
-FELL_BACK = collections.defaultdict(int)  # component -> calls that took the original path
-ON = set()   # components whose patch is installed in this process (set by the patches)
-TEXT = {}    # components reported as text, set by solution.apply(): startup, build
+RAN = collections.defaultdict(int)                                              
+FELL_BACK = collections.defaultdict(int)                                                  
+ON = set()                                                                             
+TEXT = {}                                                                          
 _seen = {"printed": False, "state": None, "exit_hook": False}
 
-# The order of the line; the components that are not in ON print `off`.
+                                                                       
 ORDER = ("head", "vchunk", "compact", "rows8", "unpad", "varlen", "rows_attn", "nocat", "lora",
          "lora_cast", "fused_proj", "fused_mlp", "rmsnorm", "addnorm", "rope", "group", "split",
          "nf4_dequant", "swiglu_inplace", "mlp_save_up", "mlp_recompute", "qlinear", "fp16_embed",
          "defer", "bookkeeping")
-# shown only when on
+                    
 OPTIONAL = ("rows_attn", "fused_mlp", "nf4_dequant", "mlp_save_up", "mlp_recompute", "qlinear")
 
 
@@ -95,7 +95,7 @@ def switched_on():
     on["unpad"] = unpad
     rows = unpad and bool(_const("unpad", "_ROWS_ATTENTION"))
     on["varlen"] = rows and bool(_const("unpad", "_VARLEN"))
-    on["rows_attn"] = rows and not on["varlen"]  # (the per-row path is varlen's fallback)
+    on["rows_attn"] = rows and not on["varlen"]                                           
     on["nocat"] = on["varlen"] and bool(_const("unpad", "_NOCAT"))
     on["lora_cast"] = on["lora"] and bool(_const("lora", "CAST_CACHE"))
     on["split"] = on["group"] and not _const("qgroup", "_SPLIT_OFF", True)
@@ -120,7 +120,7 @@ def steps():
 
 
 def _shown(name, on):
-    if name == "rows_attn":  # the attention path of the flat forward when varlen is off
+    if name == "rows_attn":                                                             
         return on["unpad"] and not on["varlen"]
     return name not in OPTIONAL or on[name]
 
@@ -138,8 +138,8 @@ def line(at):
     names += sorted(name for name in FELL_BACK if FELL_BACK[name] and name not in ORDER)
     tokens.append("fallbacks=" + (",".join(f"{name}:{FELL_BACK[name]}" for name in names)
                                   or "none"))
-    # components an unexpected error turned off for the rest of the process (state.py; each also
-    # printed its own `[solution] fallback:` line): shown only when there is one
+                                                                                                
+                                                                                
     disabled = getattr(sys.modules.get(f"{__package__}.state"), "DISABLED", None)
     if disabled:
         tokens.append("disabled=" + ",".join(sorted(disabled)))
@@ -151,7 +151,7 @@ def report(at, fresh_line=False):
     to stderr without one, and in a log of both streams the line would follow it."""
     try:
         text = line(at)
-    except Exception as exc:  # noqa: BLE001 - a report must never break the training run
+    except Exception as exc:                                                             
         text = f"[solution] engaged: at={at} error={type(exc).__name__}"
     print(("\n" if fresh_line else "") + text, flush=True)
 
@@ -171,7 +171,7 @@ def install(register_exit=True):
         atexit.register(report_at_exit)
     try:
         from transformers.trainer_callback import CallbackHandler
-    except Exception:  # noqa: BLE001 - no transformers trainer here: the exit line only
+    except Exception:                                                                   
         return False
     original = CallbackHandler.on_step_begin
     if getattr(original, "_solution_engaged", False):

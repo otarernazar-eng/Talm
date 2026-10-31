@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a C
 LINE = re.compile(r"\[solution\] engaged: at=(step1|exit) steps=\d+"
                   r"( [a-z0-9_]+=[\w.:/-]+)+"
                   r" fallbacks=(none|[a-z0-9_]+:\d+(,[a-z0-9_]+:\d+)*)")
-# Always on the line, in this order (the optional ones appear only when installed).
+                                                                                   
 ALWAYS = ("head", "vchunk", "compact", "rows8", "unpad", "varlen", "nocat", "lora", "lora_cast",
           "fused_proj", "rmsnorm", "addnorm", "rope", "group", "split", "swiglu_inplace",
           "fp16_embed", "defer", "bookkeeping", "startup", "warmup", "build")
@@ -56,12 +56,12 @@ def test_engaged_line_format(monkeypatch):
     assert tokens["at"] == "step1" and tokens["steps"] == "3"
     assert (tokens["head"], tokens["unpad"], tokens["rmsnorm"], tokens["lora"]) == \
         ("3", "3", "6", "12")
-    assert tokens["rope"] == tokens["addnorm"] == tokens["defer"] == "off"  # not installed
+    assert tokens["rope"] == tokens["addnorm"] == tokens["defer"] == "off"                 
     assert tokens["startup"] == "7/7" and tokens["build"] == "-O0"
     assert tokens["fallbacks"] == "none"
     fell.update(rope=2, unpad=1)
     tokens = _tokens(engaged.line("exit"))
-    # in the line's order, whatever the order of the counts
+                                                           
     assert tokens["at"] == "exit" and tokens["fallbacks"] == "unpad:1,rope:2"
     monkeypatch.setattr(engaged, "ON", set())
     monkeypatch.setattr(engaged, "TEXT", {})
@@ -80,7 +80,7 @@ def test_engaged_line_printed_once_after_the_first_step_before_the_callbacks(
     from solution import engaged
 
     assert engaged.install(register_exit=False)
-    assert engaged.install(register_exit=False)  # idempotent: wrapped once
+    assert engaged.install(register_exit=False)                            
     assert not getattr(CallbackHandler.on_step_begin._original, "_solution_engaged", False)
     monkeypatch.setitem(engaged._seen, "printed", False)
     monkeypatch.setitem(engaged._seen, "state", None)
@@ -88,7 +88,7 @@ def test_engaged_line_printed_once_after_the_first_step_before_the_callbacks(
 
     class Spy(TrainerCallback):
         def on_step_begin(self, args, state, control, **kwargs):
-            seen.append(capsys.readouterr().out)  # printed before this callback ran
+            seen.append(capsys.readouterr().out)                                    
 
     handler = CallbackHandler([Spy()], None, None, None, None)
     state, control = TrainerState(), TrainerControl()
@@ -121,12 +121,12 @@ def test_engaged_counts_the_fast_paths_of_a_training_step(monkeypatch):
     import solution
     from solution import engaged
 
-    monkeypatch.setenv("SOLUTION_VARLEN", "1")  # the single-launch attention on any GPU
+    monkeypatch.setenv("SOLUTION_VARLEN", "1")                                          
     solution.apply()
     assert getattr(CallbackHandler.on_step_begin, "_solution_engaged", False)
     for name in ("head", "unpad", "rmsnorm", "addnorm", "rope", "group", "lora",
                  "swiglu_inplace", "fp16_embed", "defer", "bookkeeping"):
-        assert name in engaged.ON, name  # every default component installed by apply()
+        assert name in engaged.ON, name                                                
     assert re.fullmatch(r"\d+/\d+", engaged.TEXT["startup"])
     config = Qwen2Config(vocab_size=600, hidden_size=64, intermediate_size=128,
                          num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2,
@@ -135,7 +135,7 @@ def test_engaged_counts_the_fast_paths_of_a_training_step(monkeypatch):
     torch.manual_seed(5)
     model = Qwen2ForCausalLM(config).cuda().train()
     model.requires_grad_(False)
-    model.model.embed_tokens.weight.requires_grad_(True)  # a gradient through every layer
+    model.model.embed_tokens.weight.requires_grad_(True)                                  
     batch, seq = 3, 24
     input_ids = torch.randint(0, 600, (batch, seq), device="cuda")
     lengths = [24, 9, 17]
@@ -151,10 +151,10 @@ def test_engaged_counts_the_fast_paths_of_a_training_step(monkeypatch):
     ran, fell = _delta(ran, engaged.RAN), _delta(fell, engaged.FELL_BACK)
     layers, kv_heads = 2, 2
     expected = {"head": 1, "vchunk": 1, "compact": 1, "unpad": 1,
-                "rows8": 2,  # one vocabulary slice (600 columns) and the gradient's finalize
-                "varlen": layers * kv_heads * 2, "nocat": layers,  # forward + backward
-                "rmsnorm": 2,  # layer 0's input norm alone, forward + backward
-                "addnorm": layers * 2 * 2,  # both residual adds of a layer, forward + backward
+                "rows8": 2,                                                                  
+                "varlen": layers * kv_heads * 2, "nocat": layers,                      
+                "rmsnorm": 2,                                                  
+                "addnorm": layers * 2 * 2,                                                     
                 "rope": layers * 2, "swiglu_inplace": layers}
     assert {name: ran.get(name, 0) for name in expected} == expected
     assert fell == {}, fell
@@ -185,7 +185,7 @@ def test_mlp_residual_add_folds_without_the_fused_head():
         model(inputs_embeds=torch.randn(1, 40, 256, device="cuda"))
     ran, fell = _delta(ran, engaged.RAN), _delta(fell, engaged.FELL_BACK)
     assert model.layers[-1]._solution_next_norm is model.norm
-    assert ran.get("addnorm") == 3 * 2 and ran.get("rmsnorm") == 1  # forward only
+    assert ran.get("addnorm") == 3 * 2 and ran.get("rmsnorm") == 1                
     assert "addnorm" not in fell and "rmsnorm" not in fell, fell
 
 
@@ -198,7 +198,7 @@ def test_flat_attention_takes_fp32_inputs_like_autocast(monkeypatch):
 
     from solution import engaged, unpad
 
-    monkeypatch.setenv("SOLUTION_VARLEN", "1")  # the single-launch attention on any GPU
+    monkeypatch.setenv("SOLUTION_VARLEN", "1")                                          
     unpad.patch_sdpa_rows()
     interface = ALL_ATTENTION_FUNCTIONS["sdpa"]
     torch.manual_seed(37)
@@ -221,7 +221,7 @@ def test_flat_attention_takes_fp32_inputs_like_autocast(monkeypatch):
                            sliding_window=None)
     out.float().sum().backward()
     ran, fell = _delta(ran, engaged.RAN), _delta(fell, engaged.FELL_BACK)
-    assert ran.get("varlen") == 2 * 2 and "varlen" not in fell  # forward + backward, 2 KV heads
+    assert ran.get("varlen") == 2 * 2 and "varlen" not in fell                                  
     assert out.dtype == torch.float16 and q.grad.dtype == torch.float32
     rows = [F.scaled_dot_product_attention(
         q[:, :, s:e].half(), k[:, :, s:e].half().repeat_interleave(6, 1),
@@ -243,7 +243,7 @@ def test_engaged_counts_the_fused_qkv_node(tmp_path):
     from solution.test_steady_state import VOCAB, _load, _save_tiny_model
 
     solution.apply()
-    _save_tiny_model(tmp_path / "tiny")  # 3 packed layers; the last one's forward is split
+    _save_tiny_model(tmp_path / "tiny")                                                    
     model = _load(tmp_path / "tiny").train()
     gen = torch.Generator().manual_seed(9)
     input_ids = torch.randint(3, VOCAB, (3, 30), generator=gen).cuda()

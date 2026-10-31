@@ -27,7 +27,7 @@ SCALE = float(os.environ.get("SOLUTION_FUZZ_SCALE", "1"))
 F16, BF16, F32 = torch.float16, torch.bfloat16, torch.float32
 
 
-# --- helpers --------------------------------------------------------------------------------
+                                                                                              
 
 def _cases(name, n):
     """(index, random.Random of that case) for the n cases of a test (string seeds: the same
@@ -134,13 +134,13 @@ def _strided(t, r):
 def _gemm_tol(a, w, factor=2.0**-7):
     """Bound for the difference of two fp16 GEMMs a @ w^T (each may reduce split-K partials in
     fp16, PyTorch's default): a few fp16 roundings of the magnitudes summed."""
-    # fp32 GEMM (a bound needs no more; cuBLAS's fp64 GEMM raised "misaligned address" on odd
-    # shapes on the RTX 4080 with CUDA 13)
+                                                                                             
+                                          
     with _exact_fp32_matmul():
         return factor * F.linear(a.detach().abs().float(), w.detach().abs().float()).double()
 
 
-# --- fused head: FusedHeadLossVocab / FusedHeadLoss / fused_head_vocab_kernel / rows kernel --
+                                                                                               
 
 def _head_reference(hidden, weight, targets, num_items):
     """The base run's head from the fp16 logits of an fp16 GEMM, in float64: per-token loss,
@@ -198,7 +198,7 @@ def _head_case(r):
         c["size"] = r.choice([1, 3, 8, 16, 40, 64, 100, 128, 255, 256, 1536, r.randint(1, 300)])
         c["n"] = r.choice([1, 2, 7, 8, 9, 63, 64, 65, _log_int(r, 1, 2100), _log_int(r, 1, 2100)])
     vocab, n = c["vocab"], c["n"]
-    min_chunk = max(1, vocab // 160)  # at most ~160 vocabulary slices per case
+    min_chunk = max(1, vocab // 160)                                           
     c["vchunk"] = r.choice([None, 4096, 8192, max(min_chunk, r.randint(1, vocab + 9)),
                             max(min_chunk, 8 * r.randint(1, max(1, vocab // 8 + 1))),
                             max(min_chunk, r.choice([1, 7, 384, 1028, 4100, 20000]))])
@@ -233,7 +233,7 @@ def _head_build(r, gen, c):
     n, vocab, size = c["n"], c["vocab"], c["size"]
     dev = "cuda"
     targets = torch.randint(0, vocab, (n,), generator=gen, device=dev)
-    # targets at the vocabulary edges and on slice boundaries
+                                                             
     chunk = c["vchunk"] or 8192
     special = torch.tensor(sorted({min(vocab - 1, v) for v in (0, vocab - 1, chunk, chunk - 1,
                                                                 4095, 4096, 2 * chunk)}),
@@ -262,12 +262,12 @@ def _head_build(r, gen, c):
         hidden[sure] = weight[targets[sure]] * r.choice([30.0, 300.0])
     hidden = hidden.to(c["hidden_dtype"])
     weight = weight.to(c["weight_dtype"])
-    if c["layout"] == "padded":  # rows not contiguous (stride size + 8): the copied slices
+    if c["layout"] == "padded":                                                            
         weight = torch.cat([weight, torch.zeros(vocab, 8, dtype=weight.dtype, device=dev)],
                            1)[:, :size]
-    elif c["layout"] == "transposed":  # stride(1) != 1: the token-chunked path
+    elif c["layout"] == "transposed":                                          
         weight = weight.t().contiguous().t()
-    if r.random() < 0.2:  # a strided targets view
+    if r.random() < 0.2:                          
         full = torch.full((2 * n,), -7, dtype=torch.int64, device=dev)
         full[::2] = targets
         targets = full[::2]
@@ -303,10 +303,10 @@ def _head_check(c, ref, res, what):
     """Our head against the float64 reference, to the arithmetic fused_head.py documents."""
     loss, token_loss, entropy, correct, grad = res
     zmax = ref["zmax"]
-    # fp32 statistics: log-sum-exp and sum(p z) over the row (relative ~1e-6 each)
+                                                                                  
     tol_loss = 2e-5 + 2e-6 * zmax
     tol_ent = 2e-5 + 1e-5 * zmax
-    if c["style"] == "random":  # two fp16 GEMMs may round a logit differently (split-K)
+    if c["style"] == "random":                                                          
         tol_loss = tol_loss + 8 * _ulp(zmax, F16)
         tol_ent = tol_ent + 16 * _ulp(zmax, F16)
     assert token_loss.dtype == entropy.dtype == F32 and correct.dtype == torch.bool
@@ -328,11 +328,11 @@ def _head_check(c, ref, res, what):
         return
     scale = c["grad_scale"] / denom
     ref_grad = ref["grad"] * scale
-    # vocabulary path: fp16 softmax weights (2^-11 relative each, |W| <= max_w) summed by an
-    # fp32-output GEMM, the fp16 row gradient (2^-11 of |dH| <= 2 max_w), one rounding to the
-    # hidden dtype. Token path: fp16 dlogits into an fp16-OUTPUT GEMM, whose split-K partials
-    # cuBLAS may reduce in fp16 (PyTorch's default allow_fp16_reduced_precision_reduction, as
-    # in the base run's own head): a few more fp16 roundings of |dH|.
+                                                                                            
+                                                                                             
+                                                                                             
+                                                                                             
+                                                                     
     bound = 2.0**-6 if c["took_tokens"] else 2.0**-8
     tol = scale * ref["max_w"] * bound + _ulp(ref_grad, grad.dtype)
     if c["style"] == "random":
@@ -367,8 +367,8 @@ def test_fuzz_fused_head():
         _head_check(c, ref, res, what)
         variant = c["variant"]
         if variant == "compact" and c["path"] == "vocab" and weight.stride(1) == 1:
-            # the accumulator over the labelled rows only: statistics bit-identical, gradient
-            # within one fp16 ulp of its largest element (fused_head.py)
+                                                                                             
+                                                                        
             with _patched(fused_head, COMPACT=not c["compact"], ROW_UNIT=c["unit"]):
                 other = _head_run(c, hidden, weight, targets, num_items)
             for name, a, b in zip(("loss", "token loss", "entropy", "correct"), res, other):
@@ -385,7 +385,7 @@ def test_fuzz_fused_head():
                                   other):
                 _assert_equal(a, b, f"{what}: labelled count given vs counted, {name}")
         elif variant == "storage":
-            # the same fp16 values stored in the other dtype (fp16_embed.py): bit-identical
+                                                                                           
             other_w = weight.to(F32 if weight.dtype == F16 else F16)
             with _patched(fused_head, COMPACT=c["compact"], ROW_UNIT=c["unit"]):
                 other = _head_run(c, hidden, other_w, targets, num_items)
@@ -396,8 +396,8 @@ def test_fuzz_fused_head():
             with _patched(fused_head, COMPACT=c["compact"], ROW_UNIT=9 - c["unit"]):
                 other = _head_run(c, hidden, weight, targets, num_items)
             _assert_equal(res[3], other[3], f"{what}: row units 8 vs 1, correct")
-            # another in-row summation order: fp32 rounding, which grows with |logits| (the
-            # entropy is lse - sum(p z) / s, two numbers close to the largest logit)
+                                                                                           
+                                                                                    
             zmax = ref["zmax"]
             row_tol = 2 * (2e-5 + 1e-5 * zmax)
             for name, a, b, tol in (("loss", res[0], other[0], float(row_tol.sum()) / ref["denom"]),
@@ -419,9 +419,9 @@ def _structured_logits(r, gen, n, vocab, pad):
     scale = r.choice([0.1, 1.0, 8.0, 100.0])
     z = torch.randn(n, vocab, generator=gen, device=dev) * scale
     if r.random() < 0.4:
-        z = (z * 4).round() / 4  # many ties
+        z = (z * 4).round() / 4             
     kind = torch.randint(0, 8, (n,), generator=gen, device=dev)
-    z[kind == 0] = z[kind == 0, :1]  # constant rows: the first index wins every tie
+    z[kind == 0] = z[kind == 0, :1]                                                 
     for col in {0, vocab - 1, min(vocab - 1, 4095), min(vocab - 1, 4096), vocab // 2}:
         rows = kind == 1 + (col % 3)
         z[rows, col] = z[rows].max(-1).values + r.choice([0.0, 0.25, 1000.0])
@@ -487,7 +487,7 @@ def test_fuzz_head_kernels_on_strided_logits():
         _assert_within(outs[0], ref_loss, tol_loss, f"{what}: vocab kernel loss")
         _assert_within(outs[1], ref_ent, tol_ent, f"{what}: vocab kernel entropy")
         _assert_equal(outs[2].bool(), ref_correct, f"{what}: vocab kernel argmax hits")
-        if z.stride(0) == vocab or r.random() < 0.5:  # the rows kernel takes any row stride too
+        if z.stride(0) == vocab or r.random() < 0.5:                                            
             rows_out = [torch.empty(n, device=dev), torch.empty(n, device=dev),
                         torch.empty(n, dtype=torch.int32, device=dev)]
             logits = z.clone() if z.stride(0) == vocab else z.contiguous()
@@ -497,7 +497,7 @@ def test_fuzz_head_kernels_on_strided_logits():
             _assert_equal(rows_out[2].bool(), ref_correct, f"{what}: rows kernel argmax hits")
 
 
-# --- RMSNorm and the residual add folded into it (rmsnorm.py) -------------------------------
+                                                                                              
 
 def _norm_reference(s, weight, eps):
     """float64 RMSNorm of the values of `s`: (y, xhat, rstd)."""
@@ -548,7 +548,7 @@ def test_fuzz_rmsnorm():
         x = (torch.randn(shape, generator=gen, device="cuda")
              * r.choice([1e-3, 1.0, 30.0, 1000.0])).to(x_dtype)
         if r.random() < 0.15:
-            x[..., 0, :] = 0  # a zero row: rstd = 1 / sqrt(eps)
+            x[..., 0, :] = 0                                    
         x = _strided(x, r).requires_grad_(True)
         weight = (torch.rand(shape[-1], generator=gen, device="cuda") * 4 - 2).to(w_dtype)
         dy = _strided(torch.randn(shape, generator=gen, device="cuda").to(out_dtype), r)
@@ -630,7 +630,7 @@ def test_fuzz_add_rmsnorm():
             theirs = run(separate)
             for name, a, t in zip(("sum", "norm output", "dx", "dbranch"), ours, theirs):
                 _assert_equal(a, t, f"{what}: {name} vs separate add + RMSNorm")
-        s32 = x0.float() + b0.float()  # the kernel's fp32 sum (rounded to x's dtype in `total`)
+        s32 = x0.float() + b0.float()                                                           
         _assert_equal(ours[0], s32.to(x_dtype), f"{what}: sum")
         y_ref, xhat, rstd = _norm_reference(s32, weight, eps)
         _assert_within(ours[1], y_ref, _ulp(y_ref, out_dtype) + 2.0**-19 * y_ref.abs(),
@@ -706,7 +706,7 @@ def test_fuzz_add_norm_across_layers():
             _assert_within(dx, ref_dx, 2e-3 * ref_dx.abs() + 2 * spread, f"{what}: input gradient")
 
 
-# --- RoPE (rope.py) ---------------------------------------------------------------------------
+                                                                                                
 
 def _rope_ref(x, cos, sin, backward):
     """float64 rotation of x [1, H, N, D] by cos/sin [1, N, D] (backward: the transpose), and the
@@ -765,7 +765,7 @@ def test_fuzz_rope():
         gen = _gen(r)
         q, q_kind = _rope_input(r, gen, hq, n, dim, hk)
         k, k_kind = _rope_input(r, gen, hk, n, dim, hq)
-        if r.random() < 0.6:  # transformers' table at per-row positions
+        if r.random() < 0.6:                                            
             pos = torch.cat([torch.arange(length, device=dev) for length in
                              _split_lengths(r, n)])[None].float()
             inv = 1.0 / (r.choice([1e4, 1e6]) ** (torch.arange(0, dim, 2, device=dev).float()
@@ -776,7 +776,7 @@ def test_fuzz_rope():
             cos = torch.randn(1, n, dim, generator=gen, device=dev)
             sin = torch.randn(1, n, dim, generator=gen, device=dev)
         if r.random() < 0.3:
-            cos = torch.cat((cos, cos), -1)[..., :dim]  # strided tables (made contiguous)
+            cos = torch.cat((cos, cos), -1)[..., :dim]                                    
         grads = []
         for heads in (hq, hk):
             kind = r.choice(["token", "head", "padded", "broadcast"])
@@ -855,7 +855,7 @@ def test_fuzz_rope_patch_dispatch():
             _assert_equal(ok, rk, f"{what}: fallback k")
 
 
-# --- NF4 dequantization: per projection (nf4_dequant.py), per layer (qgroup.py), qlinear.py ---
+                                                                                                
 
 def _nf4_manual(packed, absmax, blocksize, numel, dtype=F16):
     """The NF4 format in PyTorch: high nibble first, level times the block's fp32 absmax, one
@@ -880,7 +880,7 @@ def _nf4_weight(r, gen, shape, dtype=F16):
     w = torch.randn(shape, generator=gen, device="cuda") * r.choice([0.01, 0.05, 1.0])
     flat = w.view(-1)
     if r.random() < 0.3:
-        flat[:64] = 0  # an all-zero block (absmax 0)
+        flat[:64] = 0                                
     if r.random() < 0.3:
         flat[torch.randint(0, flat.numel(), (8,), generator=gen, device="cuda")] *= 50
     return w.to(dtype)
@@ -936,10 +936,10 @@ def _group_shapes(r, qblock, conforming):
         n_in = r.choice([64, 128, 256, 512, 1536, 192, 320])
         step = double // math.gcd(n_in, double)
         shapes.append((step * r.randint(1, max(1, 1024 // step)), n_in))
-    shapes[5] = shapes[4]  # up_proj has gate_proj's shape (the save-up MLP node needs it)
-    if not conforming:  # breaks the multiple (sizes stay multiples of 8: bitsandbytes' own
-        # Linear4bit forward faulted with "misaligned address" on out_features 515, in 128,
-        # fp16, 234 tokens on the RTX 4080 / CUDA 13, without any patch of ours)
+    shapes[5] = shapes[4]                                                                 
+    if not conforming:                                                                     
+                                                                                           
+                                                                                
         idx = r.randrange(7)
         out, n_in = shapes[idx]
         shapes[idx] = (out + r.choice([8, 16, 24, 40]), n_in)
@@ -1003,7 +1003,7 @@ def test_fuzz_group_dequant():
                 outs = []
                 for idx, x in enumerate(inputs):
                     if x.requires_grad:
-                        group.expected_bwd += 1  # as the patched Linear4bit.forward does
+                        group.expected_bwd += 1                                          
                     outs.append(GroupLinear.apply(x, group, idx))
                 for idx, (o, x) in enumerate(zip(outs, inputs)):
                     b = modules[idx].bias
@@ -1028,7 +1028,7 @@ def test_fuzz_group_dequant():
                     f"{what}: a dequantized buffer outlived its pass (step {step})"
                 assert group.expected_bwd == 0 and group.split_left == 0, \
                     f"{what}: bookkeeping not at rest after step {step}"
-            # mlp_save_up.SwiGLUSaveUp against the default MLP path on the same group
+                                                                                     
             n_in = shapes[GATE][1]
             if shapes[UP][1] == n_in and shapes[UP][0] == shapes[GATE][0]:
                 x0 = torch.randn(r.choice([(1, 29), (2, 9)]) + (n_in,), generator=gen,
@@ -1113,7 +1113,7 @@ def test_fuzz_qlinear_dequant():
         assert float((ours != ref).float().mean()) < 1e-3, f"{what}: too many 1-ulp differences"
 
 
-# --- per-row causal attention (unpad.py) ----------------------------------------------------
+                                                                                              
 
 def _rows_reference(q, k, v, bounds, scale):
     """Per-row causal SDPA with the memory-efficient kernel on repeat_kv copies: [1, N, Hq, D]."""
@@ -1152,9 +1152,9 @@ def test_fuzz_rows_attention():
         d = r.choice([8, 16, 32, 64, 64, 128, 128, 24, 40, 80, 96, 160, 256])
         dtype = r.choice([F16, F16, BF16])
         if dtype == BF16 and torch.cuda.get_device_capability()[0] < 8:
-            # below sm80 (the T4) no SDPA kernel takes bf16 (the reference would raise "No
-            # available kernel"), and the patch only sends fp16 there: drawn, then fp16, so the
-            # other parameters of every case stay those of newer GPUs
+                                                                                          
+                                                                                               
+                                                                     
             dtype = F16
         scale = r.choice([d ** -0.5, d ** -0.5, 0.05, 1.0])
         bounds, start = [], 0
@@ -1200,8 +1200,8 @@ def test_fuzz_rows_attention():
                                                                      ref_grads, again):
                 spread = max(float((theirs.float() - theirs_again.float()).abs().max()),
                              float((ours.float() - ours_again.float()).abs().max()))
-                if gname == "q":  # accumulated over key blocks in a layout-dependent order:
-                    # one ulp of the element, or fp32 rounding of the summed terms near zero
+                if gname == "q":                                                            
+                                                                                            
                     top = torch.maximum(ours.double().abs(), theirs.double().abs())
                     _assert_within(ours, theirs.double(), _ulp(top, dtype) + 2 * spread
                                    + 2.0**-18 * float(theirs.abs().max()),
@@ -1213,7 +1213,7 @@ def test_fuzz_rows_attention():
                                    + 2 * spread, f"{what}: {name} d{gname}")
 
 
-# --- LoRA projection node and its fp16 adapter copies (lora.py) -------------------------------
+                                                                                                
 
 def _lora_layer(hidden, kv, rank):
     from peft import LoraConfig
@@ -1362,7 +1362,7 @@ def test_fuzz_half_copies_follow_the_adapter_weights():
         bnb.nn.Linear4bit.forward = saved
 
 
-# --- fused projections on the packed layer (fused_proj.py) -----------------------------------
+                                                                                               
 
 def test_fuzz_fused_projections():
     """q|k|v as one FusedProjections node and the opt-in FusedMLP, against the separate path
@@ -1403,7 +1403,7 @@ def test_fuzz_fused_projections():
         leaf = torch.randn(shape, generator=gen, device=dev).half()
         grads = [torch.randn(shape[:-1] + (w,), generator=gen, device=dev).half()
                  for w in (hidden, kv, kv)]
-        split = r.random() < 0.3  # the backward of the layer before the last: per projection
+        split = r.random() < 0.3                                                             
         seed = r.getrandbits(31)
         params = [m.lora_A["default"].weight for m in (q, v)] + \
                  [m.lora_B["default"].weight for m in (q, v)]
@@ -1458,7 +1458,7 @@ def test_fuzz_fused_projections():
         _assert_equal(ours[3], ref[3], f"{what}: CUDA generator state")
         group.expected_bwd = group.split_left = 0
         group.cache = {"fwd": [None, 0], "bwd": [None, 0]}
-        # the opt-in fused MLP against the default one on the same group
+                                                                        
         if r.random() < 0.5:
             x0 = torch.randn(shape, generator=gen, device=dev).half()
             gy = torch.randn(shape, generator=gen, device=dev).half()
@@ -1476,9 +1476,9 @@ def test_fuzz_fused_projections():
                 res.append((y.detach(), x.grad))
                 group.expected_bwd = group.split_left = 0
                 group.cache = {"fwd": [None, 0], "bwd": [None, 0]}
-            # opt-in path without a stated bound: a sanity check relative to the largest element
-            # (gate/up and down accumulated in other orders, rounding differences carried
-            # through the activation)
+                                                                                                
+                                                                                         
+                                     
             _assert_within(res[1][0], res[0][0].double(),
                            2.0**-5 * float(res[0][0].abs().max()) + 4 * _ulp(res[0][0].double(),
                                                                              F16),
@@ -1492,7 +1492,7 @@ def test_fuzz_fused_projections():
             module.scaling["default"] = 2.0
 
 
-# --- SwiGLU with the backward written in place (swiglu_inplace.py) ----------------------------
+                                                                                                
 
 def test_fuzz_swiglu_inplace_matches_the_example():
     """Our in-place-backward wrapper around the example's kernels on random sizes, fp16/bf16/
@@ -1542,7 +1542,7 @@ def test_fuzz_swiglu_inplace_matches_the_example():
             leaves[0].chunk(2, -1) if kind == "halves" else (leaves[0][0], leaves[0][1]))
         g, u = gate.double(), up.double()
         exact = g * torch.sigmoid(g) * u
-        # the example's fp32 sigmoid flushes below fp32's normal range (gate < -87)
+                                                                                   
         flush = torch.finfo(F32).tiny * (g.abs() * u.abs() + 1)
         _assert_within(out, exact, _ulp(exact, dtype) + 2.0**-18 * exact.abs() + flush,
                        f"{what}: value")

@@ -25,7 +25,7 @@ def test_add_rmsnorm_matches_pytorch(n_rows):
     g_sum = torch.randn(1, n_rows, hidden, device="cuda")
     g_y = torch.randn(1, n_rows, hidden, device="cuda", dtype=torch.float16)
 
-    ref_sum = x + branch  # what Qwen2DecoderLayer does: fp32 + fp16 -> fp32
+    ref_sum = x + branch                                                    
     var = ref_sum.pow(2).mean(-1, keepdim=True)
     ref_y = (weight * (ref_sum * torch.rsqrt(var + eps))).to(torch.float16)
     ((ref_sum * g_sum).sum() + (ref_y.float() * g_y.float()).sum()).backward()
@@ -34,7 +34,7 @@ def test_add_rmsnorm_matches_pytorch(n_rows):
 
     total, y = AddRMSNorm.apply(x, branch, weight, eps, torch.float16)
     assert total.dtype == torch.float32 and y.dtype == torch.float16
-    torch.testing.assert_close(total, ref_sum.detach(), rtol=0, atol=0)  # the same fp32 add
+    torch.testing.assert_close(total, ref_sum.detach(), rtol=0, atol=0)                     
     torch.testing.assert_close(y.float(), ref_y.float(), rtol=2e-3, atol=2e-3)
     ((total * g_sum).sum() + (y.float() * g_y.float()).sum()).backward()
     assert branch.grad.dtype == torch.float16
@@ -142,12 +142,12 @@ def test_add_norm_across_layers_is_bit_identical():
         out, dx = run(rmsnorm.LAYER_FORWARDS["add_norm"], linked=True)
     finally:
         rmsnorm.RMSNorm.apply, rmsnorm.AddRMSNorm.apply = norm_apply, add_apply
-    # only layer 0's input norm runs alone; every residual add sits in a norm kernel
+                                                                                    
     assert calls == {"norm": 1, "add_norm": 6}
     assert model.layers[-1]._solution_next_norm is model.norm
     assert out.dtype == torch.float16 and torch.equal(out, ref_out)
-    # bit for bit where the attention backward is deterministic; on a T4 the efficient-attention
-    # backward is not run-to-run reproducible, so there the reference's own spread bounds it
+                                                                                                
+                                                                                            
     spread = float((ref_dx - again_dx).abs().max())
     if spread == 0.0:
         assert torch.equal(dx, ref_dx)
@@ -197,7 +197,7 @@ def test_varlen_attention_matches_rows_attention(lengths):
     _, again = run(lambda q1, k1, v1: RowsAttention.apply(q1, k1, v1, rows, scale))
     out, grads = run(varlen)
     assert out.shape == (1, n, 12, 128) and out.is_contiguous()
-    assert torch.equal(out, ref)  # the same forward kernel on the same rows
+    assert torch.equal(out, ref)                                            
     for ours, theirs, theirs_again in zip(grads, ref_grads, again):
         assert ours.shape == theirs.shape
         spread = float((theirs.float() - theirs_again.float()).abs().max())
@@ -240,7 +240,7 @@ def test_varlen_backward_without_copies_and_cats_is_exact(monkeypatch, lengths):
         spread = float((theirs.float() - again.float()).abs().max())
         if spread == 0.0 and torch.equal(ours, theirs):
             continue
-        ulp = float(theirs.float().abs().max()) * 2.0 ** -10  # one fp16 ulp of the largest element
+        ulp = float(theirs.float().abs().max()) * 2.0 ** -10                                       
         torch.testing.assert_close(ours, theirs, rtol=0, atol=max(2 * spread, ulp))
 
 
@@ -284,6 +284,6 @@ def test_rows_sdpa_takes_the_varlen_path(monkeypatch):
     ref = F.scaled_dot_product_attention(q, k.repeat_interleave(6, dim=1),
                                          v.repeat_interleave(6, dim=1), attn_mask=mask,
                                          scale=128 ** -0.5).transpose(1, 2)
-    # measured on an RTX 4080: rtol 2e-3 needs atol 2.7e-5 x max; set 4e-4 x max
+                                                                                
     torch.testing.assert_close(out.float(), ref.float(), rtol=2e-3,
                                atol=4e-4 * float(ref.detach().abs().max()))

@@ -23,9 +23,9 @@ def _lora_layer(rank=16, hidden=256, kv=64):
     for name in ("q_proj", "v_proj"):
         wrapped = LoraLinear4bit(getattr(layer.self_attn, name), "default", config=config, r=rank,
                                  lora_alpha=2 * rank)
-        wrapped.lora_A.float()  # fp32 adapter weights, as get_peft_model leaves them in training
+        wrapped.lora_A.float()                                                                   
         wrapped.lora_B.float()
-        torch.nn.init.normal_(wrapped.lora_B["default"].weight, std=0.05)  # PEFT starts at 0
+        torch.nn.init.normal_(wrapped.lora_B["default"].weight, std=0.05)                    
         setattr(layer.self_attn, name, wrapped)
     return layer
 
@@ -74,7 +74,7 @@ def test_lora_node_is_bit_identical_to_peft(n_tokens, train):
         x = leaf.clone().requires_grad_(True)
         torch.cuda.manual_seed(11)
         with torch.autocast("cuda", dtype=torch.float16):
-            h = x * 1.0  # a non-leaf: autograd accumulates the five input gradients in a buffer
+            h = x * 1.0                                                                         
             outs = [lora_forward(q, h), k(h), lora_forward(v, h)]
         sum((o * g).float().sum() for o, g in zip(outs, grads)).backward()
         return outs, x.grad, [prm.grad.clone() for prm in params], torch.cuda.get_rng_state()
@@ -93,7 +93,7 @@ def test_lora_node_is_bit_identical_to_peft(n_tokens, train):
         ref_outs, ref_dx, ref_grads, ref_state = run(original)
         assert calls["n"] == 0
         outs, dx, ours, state = run(lambda mod, inp: mod(inp))
-        assert calls["n"] == 2  # q_proj and v_proj took the node
+        assert calls["n"] == 2                                   
     finally:
         bnb.nn.Linear4bit.forward = saved
         lora.LoraProjectionTorch.apply = node_apply
@@ -149,17 +149,17 @@ def test_half_copies_are_exact_and_follow_every_update():
     first = cache.get(a)
     assert first.dtype == torch.float16 and torch.equal(first, a.to(torch.float16))
     assert torch.equal(cache.get(b), b.detach().to(torch.float16))
-    assert cache.get(a) is first  # no change: the same copy
+    assert cache.get(a) is first                            
     with torch.no_grad():
-        b.mul_(3.0)  # in place: the version counter moves
+        b.mul_(3.0)                                       
     assert torch.equal(cache.get(b), b.detach().to(torch.float16))
     kept = first.clone()
-    a.data.add_(1.0)  # through .data: the version counter of `a` does not move ...
+    a.data.add_(1.0)                                                               
     assert cache.get(a) is first
-    cache.invalidate()  # ... but every optimizer step invalidates the copies
+    cache.invalidate()                                                       
     assert torch.equal(cache.get(a), a.to(torch.float16))
-    assert torch.equal(first, kept)  # the earlier copy is untouched
-    # the post-hook, through a real optimizer step
+    assert torch.equal(first, kept)                                 
+                                                  
     p = torch.nn.Parameter(torch.zeros(4, device="cuda"))
     p.grad = torch.ones(4, device="cuda")
     lora._half.get(a)
@@ -180,13 +180,13 @@ def test_half_copies_hold_no_memory_after_an_optimizer_step():
     torch.manual_seed(28)
     w = torch.nn.Parameter(torch.randn(16, 1536, device="cuda") * 0.02)
     w.grad = torch.randn_like(w)
-    copy = lora._half.get(w)  # held here as a forward's ctx holds it through its backward
+    copy = lora._half.get(w)                                                              
     ref, before = weakref.ref(copy), copy.clone()
     torch.optim.SGD([w], lr=0.1).step()
     assert lora._half.entries[lora._half.slots[id(w)]][2] is None
-    assert ref() is copy and torch.equal(copy, before)  # the holder's copy is untouched
+    assert ref() is copy and torch.equal(copy, before)                                  
     del copy
-    assert ref() is None  # freed: the cache keeps no reference to it
+    assert ref() is None                                             
     assert torch.equal(lora._half.get(w), w.detach().to(torch.float16))
 
 
@@ -234,13 +234,13 @@ def test_lora_patch_falls_back_to_peft_outside_the_plain_case():
     x = torch.randn(3, 50, 256, device="cuda", dtype=torch.float16)
     with torch.autocast("cuda", dtype=torch.float16):
         assert lora.lora_plan(q, x) is not None
-        assert lora.lora_plan(q, x.float()) is None  # fp32 input
+        assert lora.lora_plan(q, x.float()) is None              
         q.enable_adapters(False)
         assert lora.lora_plan(q, x) is None
         q.enable_adapters(True)
         assert lora.lora_plan(q, x) is not None
-    assert lora.lora_plan(q, x) is None  # no autocast: PEFT casts to fp32 itself
-    # training mode with lora_B = 0 leaves exactly the base output
+    assert lora.lora_plan(q, x) is None                                          
+                                                                  
     q.train()
     torch.nn.init.zeros_(q.lora_B["default"].weight)
     with torch.autocast("cuda", dtype=torch.float16):

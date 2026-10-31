@@ -39,9 +39,9 @@ class SwiGLUInPlaceGrad(torch.autograd.Function):
                 n = gate.numel()
                 example_swiglu_bwd_kernel[(triton.cdiv(n, BLOCK),)](grad, gate, up, gate, up, n,
                                                                    BLOCK=BLOCK)
-                return gate, up  # now dgate and dup
-            except Exception as exc:  # noqa: BLE001 - see state.py
-                # a launch that raised wrote nothing: gate and up still hold the activations
+                return gate, up                     
+            except Exception as exc:                               
+                                                                                            
                 if not fallback("swiglu", exc):
                     raise
         return reference_grads(grad, gate, up)

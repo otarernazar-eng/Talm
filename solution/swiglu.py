@@ -47,7 +47,7 @@ def example_swiglu_bwd_kernel(grad_ptr, gate_ptr, up_ptr, dgate_ptr, dup_ptr, n_
 
 def reference_grads(grad, gate, up):
     """The backward kernel's formulas in PyTorch ops (fp32), for a launch that failed."""
-    FELL_BACK["swiglu_inplace"] += 1  # engaged.py's MLP counter: this call degraded
+    FELL_BACK["swiglu_inplace"] += 1                                                
     g, a, b = grad.float(), gate.float(), up.float()
     sig = torch.sigmoid(a)
     dgate = g * b * sig * (1.0 + a * (1.0 - sig))
@@ -78,7 +78,7 @@ class SwiGLU(torch.autograd.Function):
                 example_swiglu_bwd_kernel[(triton.cdiv(n, BLOCK),)](grad, gate, up, dgate, dup, n,
                                                                    BLOCK=BLOCK)
                 return dgate, dup
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("swiglu", exc):
                     raise
         return reference_grads(grad, gate, up)
@@ -93,10 +93,10 @@ def activate(mlp, gate, up, fused):
     MLP, `act_fn(gate) * up`, on the same projections."""
     try:
         return fused(gate, up)
-    except Exception as exc:  # noqa: BLE001 - see state.py
+    except Exception as exc:                               
         if not fallback("swiglu", exc):
             raise
-    FELL_BACK["swiglu_inplace"] += 1  # engaged.py's MLP counter: this call degraded
+    FELL_BACK["swiglu_inplace"] += 1                                                
     return getattr(mlp, "act_fn", F.silu)(gate) * up
 
 

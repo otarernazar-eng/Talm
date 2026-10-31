@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a C
 VOCAB = 600
 
 
-# --- the patched causal LM end to end -------------------------------------------------------
+                                                                                              
 
 def _tiny_lm(seed=5):
     from transformers import Qwen2Config, Qwen2ForCausalLM
@@ -50,7 +50,7 @@ def _tiny_lm(seed=5):
     torch.manual_seed(seed)
     model = Qwen2ForCausalLM(config).cuda().train()
     model.requires_grad_(False)
-    model.model.embed_tokens.weight.requires_grad_(True)  # a gradient through every layer
+    model.model.embed_tokens.weight.requires_grad_(True)                                  
     return model
 
 
@@ -78,12 +78,12 @@ def _batch(lengths, seq=None, prompt=4, left=False, labelled_rows=None, all_labe
     if hole:
         mask[0, 5] = 0
         labels[0, 5] = -100
-    input_ids[mask == 0] = VOCAB - 1  # the pad token
+    input_ids[mask == 0] = VOCAB - 1                 
     return input_ids.cuda(), mask.cuda(), labels.cuda()
 
 
 CASES = {
-    # name: (lengths, keyword arguments of _batch)
+                                                  
     "row_without_labels": ([24, 9, 17, 20], {"labelled_rows": {0, 1, 3}}),
     "equal_lengths_no_padding": ([20, 20, 20, 20], {}),
     "one_token_row": ([24, 1, 17, 5], {}),
@@ -136,13 +136,13 @@ def test_patched_forward_matches_original_on_edge_batches(monkeypatch, case, att
 
     lengths, kwargs = CASES[case]
     model = _tiny_lm()
-    if attention == "varlen":  # the T4 path, forced on any GPU
+    if attention == "varlen":                                  
         monkeypatch.setenv("SOLUTION_VARLEN", "1")
         monkeypatch.setattr(unpad, "_VARLEN", True)
     else:
         monkeypatch.setattr(unpad, "_VARLEN", False)
     monkeypatch.setitem(patches._unpad, "enabled", True)
-    monkeypatch.setitem(patches._unpad, "checked", 0)  # the right-padding check runs
+    monkeypatch.setitem(patches._unpad, "checked", 0)                                
     calls = collections.Counter()
     for name in ("VarlenRowsAttention", "RowsAttention"):
         cls = getattr(unpad, name)
@@ -164,12 +164,12 @@ def test_patched_forward_matches_original_on_edge_batches(monkeypatch, case, att
     grad = model.model.embed_tokens.weight.grad
 
     right_padded = not (kwargs.get("left") or kwargs.get("hole"))
-    assert patches._unpad["enabled"] is right_padded  # off for good after such a batch
+    assert patches._unpad["enabled"] is right_padded                                   
     expected = {"varlen": "VarlenRowsAttention", "rows": "RowsAttention"}[attention]
     assert calls[expected] == (model.config.num_hidden_layers if right_padded else 0)
     assert int(step.labelled) == n_labelled
     if n_labelled == 0:
-        assert torch.isnan(out.loss) and torch.isnan(ref_loss)  # 0 / 0, as the base
+        assert torch.isnan(out.loss) and torch.isnan(ref_loss)                      
     else:
         torch.testing.assert_close(out.loss.float(), ref_loss.float(), rtol=2e-2, atol=1e-3)
     torch.testing.assert_close(step.token_loss, ref_token, rtol=3e-2, atol=2e-2)
@@ -217,7 +217,7 @@ def tiny_qlora(tmp_path_factory):
     torch.manual_seed(7)
     for name, param in model.named_parameters():
         if "lora_B" in name:
-            torch.nn.init.normal_(param, std=0.02)  # PEFT starts B at 0: no gradient for A
+            torch.nn.init.normal_(param, std=0.02)                                         
     model.train()
     return model
 
@@ -249,7 +249,7 @@ def test_qlora_forward_matches_original_on_edge_batches(monkeypatch, tiny_qlora,
     node = lora.LoraProjectionTorch.apply
     monkeypatch.setattr(lora.LoraProjectionTorch, "apply",
                         lambda *a: calls.update(["lora"]) or node(*a))
-    fused = fused_proj.FusedProjections.apply  # q|k|v as one node (fused_proj.py)
+    fused = fused_proj.FusedProjections.apply                                     
     monkeypatch.setattr(fused_proj.FusedProjections, "apply",
                         lambda *a: calls.update(["qkv"]) or fused(*a))
     lengths, kwargs = CASES[case]
@@ -266,7 +266,7 @@ def test_qlora_forward_matches_original_on_edge_batches(monkeypatch, tiny_qlora,
         out.loss.backward()
         groups = {m._solution_group[0] for m in inner.modules() if hasattr(m, "_solution_group")}
         assert len(groups) == 2 and all(g.splittable for g in groups)
-        for g in groups:  # nothing cached or pending between steps
+        for g in groups:                                           
             assert g.cache["fwd"][0] is None and g.cache["bwd"][0] is None
             assert g.expected_bwd == 0 and g.split_left == 0
         return out, [p.grad.clone() for p in params]
@@ -277,8 +277,8 @@ def test_qlora_forward_matches_original_on_edge_batches(monkeypatch, tiny_qlora,
     calls.clear()
     out, grads = run(lambda: model(input_ids=input_ids, attention_mask=mask, labels=labels,
                                    num_items_in_batch=num_items))
-    # q and v of both layers took the LoRA node, or the fused q|k|v node (which runs both
-    # adapters) where the layer's forward dequantizes the whole layer (not the last one)
+                                                                                         
+                                                                                        
     assert out.logits is None and calls["lora"] + 2 * calls["qkv"] == 4
     step = patches._pending_step[-1]
     shift = F.pad(labels, (0, 1), value=-100)[:, 1:]
@@ -337,13 +337,13 @@ def test_right_padding_check():
         assert bounds[-1][1] == sum(lengths) == int(mask.sum())
         return is_right_padded(mask, lengths)
 
-    assert check([[1, 1, 1], [1, 0, 0], [1, 1, 0]])      # right padding
-    assert check([[1, 1, 1], [1, 1, 1]])                 # no padding at all
-    assert check([[1, 0, 0]])                            # one row
-    assert check([[1, 1], [0, 0]])                       # an empty row
-    assert not check([[1, 1, 1], [0, 1, 1]])             # left padding
-    assert not check([[1, 0, 1], [1, 1, 1]])             # a hole
-    assert not check([[0, 0, 1]])                        # one left-padded row
+    assert check([[1, 1, 1], [1, 0, 0], [1, 1, 0]])                     
+    assert check([[1, 1, 1], [1, 1, 1]])                                    
+    assert check([[1, 0, 0]])                                     
+    assert check([[1, 1], [0, 0]])                                     
+    assert not check([[1, 1, 1], [0, 1, 1]])                           
+    assert not check([[1, 0, 1], [1, 1, 1]])                     
+    assert not check([[0, 0, 1]])                                             
 
 
 def test_row_bounds_with_empty_and_one_token_rows():
@@ -361,7 +361,7 @@ def test_row_bounds_with_empty_and_one_token_rows():
         assert cu.tolist() == [0, 7, 8, 17] and max_len == 9 and total == 17
 
 
-# --- fused head -----------------------------------------------------------------------------
+                                                                                              
 
 @pytest.mark.parametrize("path", ["vocab", "tokens"])
 @pytest.mark.parametrize("compact", [True, False])
@@ -389,7 +389,7 @@ def test_head_without_labels_and_zero_num_items_gives_zero_gradient(monkeypatch,
     logits = (ref_hidden @ weight.half().t()).float()
     ref_loss = F.cross_entropy(logits, targets, ignore_index=-100, reduction="sum") / (
         items.float() if torch.is_tensor(items) else items)
-    (ref_loss * 1024.0).backward()  # a GradScaler-sized factor
+    (ref_loss * 1024.0).backward()                             
 
     loss, token_loss, entropy, correct = fused_head_loss(hidden, weight, targets, items, **kwargs)
     (loss * 1024.0).backward()
@@ -415,7 +415,7 @@ def test_head_odd_sizes_and_label_fractions(path, n_tokens, labelled):
     weight = torch.randn(vocab, size, device="cuda") * 0.05
     targets = torch.randint(0, vocab, (n_tokens,), device="cuda")
     targets[torch.rand(n_tokens, device="cuda") >= labelled] = -100
-    rows = (targets >= 0).nonzero().flatten().tolist()  # hits and misses among the labelled
+    rows = (targets >= 0).nonzero().flatten().tolist()                                      
     planted = plant_hits(hidden, weight, targets, rows, boundary_columns(vocab, 4096) * 2, 40.0)
     hidden.requires_grad_(True)
     n_lab = int((targets >= 0).sum())
@@ -431,14 +431,14 @@ def test_head_odd_sizes_and_label_fractions(path, n_tokens, labelled):
     torch.testing.assert_close(loss, ref_loss, rtol=1e-4, atol=1e-5)
     torch.testing.assert_close(token_loss, ref_token, rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(entropy, ref_entropy, rtol=1e-4, atol=1e-4)
-    assert int(ref_correct.sum()) >= planted  # the planted hits are hits
+    assert int(ref_correct.sum()) >= planted                             
     assert torch.equal(correct, ref_correct)
     scale = max(float(ref_grad.abs().max()), 1e-6)
     torch.testing.assert_close(hidden.grad.float(), ref_grad.float(), rtol=2e-2, atol=2e-2 * scale)
     assert (hidden.grad[targets < 0] == 0).all()
 
 
-# --- variable-length attention --------------------------------------------------------------
+                                                                                              
 
 @pytest.mark.parametrize("lengths", [[512, 512, 512, 512], [1], [1, 1, 1, 1], [0, 7, 1, 0, 9],
                                      [3, 5, 2], [511, 1, 512, 13]])
@@ -486,7 +486,7 @@ def test_varlen_attention_on_edge_lengths(lengths):
     torch.testing.assert_close(out.float(), dense, rtol=1e-2, atol=1e-2)
 
 
-# --- LoRA node and add+norm on the edge token counts ----------------------------------------
+                                                                                              
 
 @pytest.mark.parametrize("n_tokens", [2, 3, 2048])
 def test_lora_node_bit_identical_on_edge_token_counts(n_tokens):
@@ -502,7 +502,7 @@ def test_add_norm_on_edge_token_counts(n_rows):
     test_add_rmsnorm_matches_pytorch(n_rows)
 
 
-# --- split dequantization: bookkeeping when only part of a layer needs gradients -------------
+                                                                                               
 
 @pytest.mark.parametrize("depth", [0, 1, None])
 def test_split_dequant_when_the_attention_inputs_need_no_gradient(monkeypatch, depth):
@@ -527,7 +527,7 @@ def test_split_dequant_when_the_attention_inputs_need_no_gradient(monkeypatch, d
     setup_layer(layer)
     group = modules[0]._solution_group[0]
     assert group.splittable
-    x = torch.randn(1, 37, 512, device="cuda", dtype=torch.float16)  # no gradient
+    x = torch.randn(1, 37, 512, device="cuda", dtype=torch.float16)               
     h = torch.randn(1, 37, 512, device="cuda", dtype=torch.float16, requires_grad=True)
     m = torch.randn(1, 37, 1024, device="cuda", dtype=torch.float16, requires_grad=True)
 
@@ -535,7 +535,7 @@ def test_split_dequant_when_the_attention_inputs_need_no_gradient(monkeypatch, d
         outs = []
         for i, inp in enumerate([x, x, x, h, h, h, m]):
             if inp.requires_grad:
-                group.expected_bwd += 1  # as the patched Linear4bit.forward does
+                group.expected_bwd += 1                                          
             outs.append(GroupLinear.apply(inp, group, i))
         sum((o.float() ** 2).mean() for o in outs).backward()
         assert group.split_left == 0 and group.expected_bwd == 0
@@ -548,7 +548,7 @@ def test_split_dequant_when_the_attention_inputs_need_no_gradient(monkeypatch, d
     for group_depth in (depth, None):
         group.depth = group_depth
         first = step()
-        with torch.no_grad():  # an evaluation forward in between
+        with torch.no_grad():                                    
             for i, inp in enumerate([x, x, x, h, h, h, m]):
                 GroupLinear.apply(inp, group, i)
         assert group.expected_bwd == 0 and group.cache["fwd"][0] is None
@@ -592,7 +592,7 @@ def _qlora_step_tools(monkeypatch, model):
         launches.clear()
         out = forward(fn)
         out.loss.backward()
-        for g in groups():  # nothing cached or pending between steps
+        for g in groups():                                           
             assert g.cache["fwd"][0] is None and g.cache["bwd"][0] is None
             assert g.expected_bwd == 0 and g.split_left == 0
         return out, launches["n"], [p.grad.clone() for p in params]
@@ -612,18 +612,18 @@ def test_group_starts_afresh_after_an_interrupted_step(monkeypatch, tiny_qlora, 
     monkeypatch.setattr(qgroup, "SPLIT_LAYERS",
                         {"fwd": 1, "bwd": 2} if split else {"fwd": 0, "bwd": 0})
     tools = _qlora_step_tools(monkeypatch, tiny_qlora)
-    tools.step()  # packs the layers on a first run (and compiles)
+    tools.step()                                                  
     _, n_clean, clean = tools.step()
     if not split:
-        assert n_clean == 2 * 2  # 2 layers x (forward, backward)
+        assert n_clean == 2 * 2                                  
     if interrupt == "backward_never_runs":
-        tools.forward()  # the loss is dropped
+        tools.forward()                       
     else:
         weight = qgroup.LayerGroup.weight
 
         def failing(self, which, idx):
             if which == "bwd" and (self.cache["bwd"][0] is not None or self.split_left):
-                raise RuntimeError("interrupted")  # the second weight use of a backward pass
+                raise RuntimeError("interrupted")                                            
             return weight(self, which, idx)
 
         monkeypatch.setattr(qgroup.LayerGroup, "weight", failing)
@@ -652,7 +652,7 @@ def test_group_and_add_norm_under_gradient_checkpointing(monkeypatch, tiny_qlora
     monkeypatch.setattr(qgroup, "SPLIT_LAYERS", {"fwd": 1, "bwd": 2})
     tools = _qlora_step_tools(monkeypatch, tiny_qlora)
     inner = tools.inner
-    tools.step()  # a fused step: every layer is linked to the norm that reads its output
+    tools.step()                                                                         
     assert all(getattr(layer, "_solution_next_norm", None) is not None
                for layer in inner.model.layers)
     ref, _, ref_grads = tools.step(patches.ORIGINAL_FORWARD[type(inner)])
@@ -664,8 +664,8 @@ def test_group_and_add_norm_under_gradient_checkpointing(monkeypatch, tiny_qlora
     finally:
         inner.gradient_checkpointing_disable()
         inner.disable_input_require_grads()
-    assert out.logits is not None  # the original causal-LM path
-    assert n_launches > 0  # the 4-bit projections still went through the layer groups
+    assert out.logits is not None                               
+    assert n_launches > 0                                                             
     torch.testing.assert_close(out.loss.float(), ref.loss.float(), rtol=1e-4, atol=1e-5)
     for g, r in zip(grads, ref_grads):
         assert torch.isfinite(g).all()
@@ -693,27 +693,27 @@ def test_soup_selective_checkpointing(monkeypatch, tiny_qlora):
     monkeypatch.setattr(qgroup, "SPLIT_LAYERS", {"fwd": 1, "bwd": 2})
     tools = _qlora_step_tools(monkeypatch, tiny_qlora)
     inner = tools.inner
-    # as in training (transformers' Trainer sets it from its args, TRL's compute_loss passes
-    # use_cache=False): without it the replayed attention would extend a KV cache a second time
+                                                                                            
+                                                                                               
     monkeypatch.setattr(inner.config, "use_cache", False)
-    tools.step()  # a fused step: every layer is linked to the norm that reads its output
+    tools.step()                                                                         
     ref, _, ref_grads = tools.step(patches.ORIGINAL_FORWARD[type(inner)])
     attentions = [layer.self_attn for layer in inner.model.layers]
     try:
         assert install_selective_hooks(tiny_qlora, "selective") == len(attentions)
-        assert not inner.model.gradient_checkpointing  # HF's flag stays off with this tier
-        out, n_launches, grads = tools.step()  # checks the groups are at rest after the step
+        assert not inner.model.gradient_checkpointing                                      
+        out, n_launches, grads = tools.step()                                                
     finally:
         for attention in attentions:
-            attention.__dict__.pop("forward", None)  # back to the class-level forward
-    assert out.logits is not None  # the original causal-LM path
-    assert n_launches > 0  # the 4-bit projections still went through the layer groups
+            attention.__dict__.pop("forward", None)                                   
+    assert out.logits is not None                               
+    assert n_launches > 0                                                             
     torch.testing.assert_close(out.loss.float(), ref.loss.float(), rtol=1e-4, atol=1e-5)
     for g, r in zip(grads, ref_grads):
         torch.testing.assert_close(g, r, rtol=1e-3, atol=5e-3 * float(r.abs().max()) + 1e-8)
 
 
-# --- deferred metrics -------------------------------------------------------------------------
+                                                                                                
 
 def _edge_metric_steps():
     """(inputs, fused step) pairs: one row, rows of one length (no padding), every position
@@ -756,7 +756,7 @@ def test_deferred_metrics_on_edge_batches():
         patches._host["defer"] = saved
     assert results[0] == results[1]
     assert results[1][1] == 37 + 80 + 76 + 64
-    assert results[1][0][2][1][-1] == 0.0  # nothing labelled: accuracy 0.0, as TRL logs it
+    assert results[1][0][2][1][-1] == 0.0                                                  
 
 
 def test_deferred_rewind_rows_on_edge_batches():
@@ -794,12 +794,12 @@ def test_no_host_sync_added_by_the_edge_paths(monkeypatch):
 
     model = _tiny_lm()
     monkeypatch.setitem(patches._unpad, "enabled", True)
-    monkeypatch.setitem(patches._unpad, "checked", 3)  # past the right-padding check
+    monkeypatch.setitem(patches._unpad, "checked", 3)                                
     batches = {"plain": _batch([24, 9, 17, 20]),
                "edge": _batch([24, 1, 17, 20], labelled_rows={0, 2}),
                "no_label": _batch([24, 9, 17, 20], labelled_rows=set())}
     counts = {}
-    for name in ("plain", "plain", "edge", "no_label"):  # the first forward does one-off work
+    for name in ("plain", "plain", "edge", "no_label"):                                       
         input_ids, mask, labels = batches[name]
         num_items = (labels[:, 1:] != -100).sum()
         torch.cuda.synchronize()

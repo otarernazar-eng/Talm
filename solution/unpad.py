@@ -35,11 +35,11 @@ import torch.nn.functional as F
 from .engaged import FELL_BACK, RAN
 from .state import DISABLED, fallback
 
-_rows = []  # the [(start, end)] row bounds of the flat sequence while a flat forward runs
-_cu = []    # the matching (cu_seqlens int32 on the GPU, longest row, total tokens) or None
+_rows = []                                                                                
+_cu = []                                                                                   
 _ROWS_ATTENTION = os.environ.get("SOLUTION_DISABLE_ROWS_ATTN") != "1"
 _VARLEN = os.environ.get("SOLUTION_DISABLE_VARLEN") != "1"
-# VarlenRowsAttention.backward without its per-KV-head gradient copies and concatenations
+                                                                                         
 _NOCAT = os.environ.get("SOLUTION_DISABLE_ATTN_NOCAT") != "1"
 
 
@@ -152,9 +152,9 @@ class RowsAttention(torch.autograd.Function):
         for s, e in bounds:
             out, lse, seed, offset = torch.ops.aten._scaled_dot_product_efficient_attention(
                 q[:, :, s:e], k[:, :, s:e], v[:, :, s:e], None, True, 0.0, True, scale=scale)
-            # the backward kernel reads `out` in exactly the layout its forward wrote
+                                                                                     
             saved += [out, lse, seed, offset]
-        rows = [saved[i].permute(2, 0, 1, 3) for i in range(0, len(saved), 4)]  # [len, Hkv, rep, D]
+        rows = [saved[i].permute(2, 0, 1, 3) for i in range(0, len(saved), 4)]                      
         attn = torch.cat(rows, 0) if len(rows) > 1 else rows[0].contiguous()
         ctx.bounds, ctx.scale = bounds, scale
         ctx.save_for_backward(query, key, value, *saved)
@@ -166,7 +166,7 @@ class RowsAttention(torch.autograd.Function):
         if "rows_attention" not in DISABLED:
             try:
                 return RowsAttention._backward(ctx, grad_out, query, key, value, saved)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rows_attention", exc):
                     raise
         FELL_BACK["rows_attn"] += 1
@@ -189,7 +189,7 @@ class RowsAttention(torch.autograd.Function):
             dks.append(dk)
             dvs.append(dv)
 
-        def rows(parts):  # [Hkv, rep, len_i, D] per row -> [Hkv, rep, N, D]
+        def rows(parts):                                                    
             return parts[0] if len(parts) == 1 else torch.cat(parts, 2)
 
         return (rows(dqs).reshape(1, hq, n, d), rows(dks).sum(1).reshape(1, hkv, n, d),
@@ -234,7 +234,7 @@ class VarlenRowsAttention(torch.autograd.Function):
         RAN["varlen"] += hkv
         ctx.max_len, ctx.scale = max_len, scale
         ctx.save_for_backward(query, key, value, cu, *saved)
-        return outs[0] if hkv == 1 else torch.cat(outs, 2)  # [1, N, Hq, D]
+        return outs[0] if hkv == 1 else torch.cat(outs, 2)                 
 
     @staticmethod
     def backward(ctx, grad_out):
@@ -242,11 +242,11 @@ class VarlenRowsAttention(torch.autograd.Function):
         if "varlen_attention" not in DISABLED:
             try:
                 return VarlenRowsAttention._backward(ctx, grad_out, query, key, value, cu, saved)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("varlen_attention", exc):
                     raise
         FELL_BACK["varlen"] += 1
-        ends = cu.tolist()  # the row offsets (one host sync, on this fallback only)
+        ends = cu.tolist()                                                          
         bounds = list(zip(ends[:-1], ends[1:]))
         return (*_reference_grads(query, key, value, bounds, ctx.scale, grad_out), None, None,
                 None)
@@ -258,10 +258,10 @@ class VarlenRowsAttention(torch.autograd.Function):
         rep = hq // hkv
         qt, kt, vt = query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2)
         if _NOCAT:
-            # The kernel copies a non-contiguous gradient by itself, here once per KV head (the
-            # head slices of [1, N, Hq, D]): one copy into KV-head-major order instead, after
-            # which every group's slice is contiguous. The key/value gradients are reduced over
-            # their query heads straight into their slice of the result: no concatenation.
+                                                                                               
+                                                                                             
+                                                                                               
+                                                                                          
             grads = grad_out.reshape(1, n, hkv, rep, d).permute(2, 0, 1, 3, 4).contiguous()
             dk_all = torch.empty(1, n, hkv, d, dtype=key.dtype, device=key.device)
             dv_all = torch.empty(1, n, hkv, d, dtype=value.dtype, device=value.device)
@@ -277,14 +277,14 @@ class VarlenRowsAttention(torch.autograd.Function):
                 None, out, cu, cu, ctx.max_len, ctx.max_len, lse, 0.0, seed, offset, 1, False,
                 scale=ctx.scale)
             dqs.append(dq)
-            if _NOCAT:  # over the query heads that shared KV head g, into its slice
+            if _NOCAT:                                                              
                 torch.sum(dk, 2, keepdim=True, out=dk_all[:, :, g:g + 1])
                 torch.sum(dv, 2, keepdim=True, out=dv_all[:, :, g:g + 1])
             else:
-                dks.append(dk.sum(2, keepdim=True))  # over the query heads that shared head g
+                dks.append(dk.sum(2, keepdim=True))                                           
                 dvs.append(dv.sum(2, keepdim=True))
 
-        def heads(parts):  # [1, N, h_i, D] per KV head -> [1, h, N, D]
+        def heads(parts):                                              
             return (parts[0] if len(parts) == 1 else torch.cat(parts, 2)).transpose(1, 2)
 
         RAN["varlen"] += hkv
@@ -314,7 +314,7 @@ def _varlen_applies(query, key, value, dropout, cu):
     return (_VARLEN and cu is not None and cu[2] == query.shape[2] and query.shape[3] <= 128
             and _rows_attention_applies(query, key, value, dropout)
             and torch.backends.cuda.mem_efficient_sdp_enabled()
-            # SOLUTION_VARLEN, a test knob, is read at each call: tests set it with setenv
+                                                                                          
             and (os.environ.get("SOLUTION_VARLEN") == "1"
                  or torch.cuda.get_device_capability(query.device)[0] < 8))
 
@@ -328,7 +328,7 @@ def _autocast_half(query):
         if not torch.is_autocast_enabled("cuda"):
             return None
         dtype = torch.get_autocast_dtype("cuda")
-    except TypeError:  # older signature
+    except TypeError:                   
         if not torch.is_autocast_enabled():
             return None
         dtype = torch.get_autocast_gpu_dtype()
@@ -347,7 +347,7 @@ def patch_sdpa_rows():
     def rows_sdpa(module, query, key, value, attention_mask, dropout=0.0, scaling=None,
                   sliding_window=None, **kwargs):
         if not _rows or query.shape[0] != 1 or sliding_window is not None:
-            if _rows and _ROWS_ATTENTION:  # inside a flat forward: engaged.py's fallback count
+            if _rows and _ROWS_ATTENTION:                                                      
                 FELL_BACK["varlen" if _VARLEN else "rows_attn"] += 1
             return original(module, query, key, value, attention_mask, dropout=dropout,
                             scaling=scaling, sliding_window=sliding_window, **kwargs)
@@ -355,15 +355,15 @@ def patch_sdpa_rows():
         cu = _cu[-1] if _cu else None
         half = _autocast_half(query)
         if half is not None:
-            # fp32 q/k/v under fp16/bf16 autocast (transformers' RoPE with fp32 cos/sin, i.e.
-            # SOLUTION_DISABLE_ROPE=1): cast as autocast casts SDPA's inputs, so the per-row
-            # paths below take them instead of the plain fallback (the same values: every path
-            # computes on the cast inputs, as the fallback's autocast SDPA does)
+                                                                                             
+                                                                                            
+                                                                                              
+                                                                                
             query, key, value = query.to(half), key.to(half), value.to(half)
         if "varlen_attention" not in DISABLED and _varlen_applies(query, key, value, dropout, cu):
             try:
                 return VarlenRowsAttention.apply(query, key, value, cu[0], cu[1], scale), None
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("varlen_attention", exc):
                     raise
         if _VARLEN and _ROWS_ATTENTION:
@@ -373,7 +373,7 @@ def patch_sdpa_rows():
             try:
                 bounds = [(s, e) for s, e in _rows[-1] if e > s]
                 out = RowsAttention.apply(query, key, value, bounds, scale)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("rows_attention", exc):
                     raise
             else:

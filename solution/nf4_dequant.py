@@ -25,10 +25,10 @@ import triton.language as tl
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
 
-BLOCK = 2048    # packed bytes per program = 4096 output elements
+BLOCK = 2048                                                     
 NUM_WARPS = 4
 
-# NormalFloat4 levels, index = 4-bit code (bitsandbytes `create_normal_map`, rounded to fp32).
+                                                                                              
 NF4_TABLE = [-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453,
              -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
              0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224,
@@ -45,7 +45,7 @@ def nf4_dequant_pairs_kernel(packed_ptr, absmax_ptr, out_ptr, n_pairs, QBLOCK: t
     q = tl.load(packed_ptr + offs, mask=mask, other=0).to(tl.int32)
     scale = tl.load(absmax_ptr + (offs * 2) // QBLOCK, mask=mask, other=0.0).to(tl.float32)
 
-    # Level of each nibble: a select tree on its four bits (NF4_TABLE in code order).
+                                                                                     
     hi = q >> 4
     b0 = (hi & 1) != 0
     b1 = (hi & 2) != 0
@@ -95,7 +95,7 @@ def _self_check(original_impl):
     """Our kernel against bitsandbytes' dequantization on a random NF4 tensor: exact match."""
     import bitsandbytes.functional as bnbf
 
-    generator = torch.Generator(device="cuda").manual_seed(0)  # leave the global RNG alone
+    generator = torch.Generator(device="cuda").manual_seed(0)                              
     w = torch.randn(1024, 1536, device="cuda", dtype=torch.float16, generator=generator)
     packed, state = bnbf.quantize_4bit(w, blocksize=64, quant_type="nf4", compress_statistics=True)
     absmax = bnbf.dequantize_blockwise(state.absmax, state.state2) + state.offset
@@ -112,7 +112,7 @@ def patch_bnb_dequant(verify=True):
     and `MatMul4Bit.backward` reach it) through the Triton kernel for NF4 fp16 on CUDA."""
     try:
         import bitsandbytes.backends.cuda.ops as ops
-    except Exception:  # noqa: BLE001 - no bitsandbytes / no CUDA backend here
+    except Exception:                                                         
         return False
     original = ops._dequantize_4bit_impl
     if getattr(original, "_solution_patched", False):
@@ -123,7 +123,7 @@ def patch_bnb_dequant(verify=True):
         try:
             if not _self_check(original):
                 return False
-        except Exception:  # noqa: BLE001 - keep bitsandbytes' kernel if the check cannot run
+        except Exception:                                                                    
             return False
 
     def impl(A, absmax, blocksize, quant_type, dtype, out):
@@ -132,9 +132,9 @@ def patch_bnb_dequant(verify=True):
                 or not out.is_contiguous() or out.numel() % 2 or "nf4_dequant" in DISABLED):
             FELL_BACK["nf4_dequant"] += 1
             return original(A, absmax, blocksize, quant_type, dtype, out=out)
-        try:  # (forward and backward both come here: state.py, bitsandbytes' kernel instead)
+        try:                                                                                 
             nf4_dequantize(A, absmax, blocksize, out)
-        except Exception as exc:  # noqa: BLE001 - see state.py
+        except Exception as exc:                               
             if not fallback("nf4_dequant", exc):
                 raise
         else:

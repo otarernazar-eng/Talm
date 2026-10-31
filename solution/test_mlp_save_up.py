@@ -9,7 +9,7 @@ import torch
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 
-HIDDEN, INTER, KV = 512, 1024, 128  # per-projection slices start on 16 bytes (splittable)
+HIDDEN, INTER, KV = 512, 1024, 128                                                        
 
 
 def _layer_group(seed):
@@ -42,17 +42,17 @@ def _layer_step(group, h, x_leaf, grads, save_up):
     for i in range(4):
         group.expected_bwd += 1
         outs.append(GroupLinear.apply(h, group, i))
-    # The window below is measured exactly, so in requested bytes: memory_allocated() counts the
-    # allocator's blocks, whose sizes depend on what earlier tests left in its cache (a block
-    # that cannot be split keeps its slack), which made these cases fail in the full suite only;
-    # and no garbage of earlier tests may be collected (freed) inside the window.
+                                                                                                
+                                                                                             
+                                                                                                
+                                                                                 
     gc.collect()
     automatic = gc.isenabled()
     gc.disable()
     try:
         torch.cuda.synchronize()
         before = _requested()
-        x = x_leaf.clone()  # the MLP input: freed after the MLP unless the node keeps it
+        x = x_leaf.clone()                                                               
         group.expected_bwd += 2
         if save_up:
             act = SwiGLUSaveUp.apply(x, group)
@@ -100,11 +100,11 @@ def test_save_up_is_bit_identical_to_the_default_mlp(monkeypatch, depth):
     for res in results[True]:
         for a, b in zip(ref[:4], res[:4]):
             assert torch.equal(a, b)
-    # The memory effect is not asserted here: a memory_allocated() delta around one layer step
-    # also contains whatever the step allocates lazily (the LoRA fp16 cast cache, the layer's
-    # cached weight buffer, cuBLAS workspaces), which depends on the test order and on other
-    # processes sharing the GPU. The peak reduction is measured end to end on the T4 (module
-    # docstring: 3,921 -> 3,361 MiB in a same-session A/B).
+                                                                                              
+                                                                                             
+                                                                                            
+                                                                                            
+                                                           
     assert isinstance(ref[4], int) and isinstance(results[True][0][4], int)
 
 
@@ -120,11 +120,11 @@ def test_patched_mlp_routes_training_calls_through_the_node(monkeypatch):
 
     monkeypatch.setattr(qgroup, "SPLIT_LAYERS", {"fwd": 0, "bwd": 0})
     for cls in (modeling_qwen2.Qwen2MLP, bnb.nn.Linear4bit):
-        monkeypatch.setattr(cls, "forward", cls.forward)  # restored after the test
-    # a fresh (unused) layer forward, so patch_group_dequant installs its Linear4bit routing even
-    # if an earlier test left the layer patched and Linear4bit restored
+        monkeypatch.setattr(cls, "forward", cls.forward)                           
+                                                                                                 
+                                                                       
     monkeypatch.setattr(modeling_qwen2.Qwen2DecoderLayer, "forward", lambda self, *a, **k: None)
-    qgroup.patch_group_dequant()  # packed projections through GroupLinear, as in training
+    qgroup.patch_group_dequant()                                                          
     patch_qwen2_mlp_inplace()
     previous = modeling_qwen2.Qwen2MLP.forward
     mlp_save_up.patch_qwen2_mlp_save_up()
@@ -145,8 +145,8 @@ def test_patched_mlp_routes_training_calls_through_the_node(monkeypatch):
     grad = torch.randn(1, 300, HIDDEN, device="cuda", dtype=torch.float16)
     results = []
     for forward in (previous, patched):
-        # the other four projections of the layer in the same pass, so the group's per-pass
-        # caches turn over as in a decoder layer
+                                                                                           
+                                                
         outs = []
         for i in range(4):
             group.expected_bwd += 1

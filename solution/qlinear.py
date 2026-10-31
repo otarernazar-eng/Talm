@@ -26,7 +26,7 @@ import triton.language as tl
 from .engaged import FELL_BACK, ON, RAN
 from .state import DISABLED, fallback
 
-BLOCK = 2048    # packed bytes per program = 4096 output elements
+BLOCK = 2048                                                     
 NUM_WARPS = 4
 
 
@@ -108,7 +108,7 @@ class QLinear4bit(torch.autograd.Function):
     def backward(ctx, grad_out):
         try:
             weight = dequantize_weight(ctx.packed, ctx.state)
-        except Exception as exc:  # noqa: BLE001 - state.py: bitsandbytes' dequantization
+        except Exception as exc:                                                         
             if not fallback("qlinear", exc):
                 raise
             weight = None
@@ -136,7 +136,7 @@ def _self_check():
 def patch_bnb_linear4bit(verify=True):
     try:
         import bitsandbytes as bnb
-    except Exception:  # noqa: BLE001
+    except Exception:                
         return False
     cls = bnb.nn.Linear4bit
     original = cls.forward
@@ -148,7 +148,7 @@ def patch_bnb_linear4bit(verify=True):
         try:
             if not _self_check():
                 return False
-        except Exception:  # noqa: BLE001
+        except Exception:                
             return False
 
     def forward(self, x):
@@ -164,7 +164,7 @@ def patch_bnb_linear4bit(verify=True):
             bias = bias.to(torch.float16)
         try:
             out = QLinear4bit.apply(x, weight.data, bias, state)
-        except Exception as exc:  # noqa: BLE001 - see state.py
+        except Exception as exc:                               
             if not fallback("qlinear", exc):
                 raise
         else:

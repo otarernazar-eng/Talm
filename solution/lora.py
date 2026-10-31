@@ -68,9 +68,9 @@ class HalfCopies:
     released at the next refresh."""
 
     def __init__(self):
-        # [weakref to the fp32 tensor, its key at the copy, the fp16 copy, the copied storage]
+                                                                                              
         self.entries = []
-        self.slots = {}    # id(tensor) -> index in entries
+        self.slots = {}                                    
 
     def get(self, param):
         slot = self.slots.get(id(param))
@@ -93,7 +93,7 @@ class HalfCopies:
     @torch.no_grad()
     def refresh(self):
         live = [entry for entry in self.entries if entry[0]() is not None]
-        if len(live) != len(self.entries):  # tensors that are gone: forget them
+        if len(live) != len(self.entries):                                      
             self.entries = live
             self.slots = {id(entry[0]()): slot for slot, entry in enumerate(live)}
         stale = {}
@@ -104,7 +104,7 @@ class HalfCopies:
         if stale:
             RAN["lora_cast"] += 1
         for device, items in stale.items():
-            # one new buffer per refresh: copies saved by an earlier forward stay as they were
+                                                                                              
             sizes = [param.numel() for _, param in items]
             flat = torch.empty(sum(sizes), dtype=torch.float16, device=device)
             copies = [part.view(param.shape)
@@ -124,7 +124,7 @@ def _to_half(lora_a, lora_b):
     """The fp16 A and B of one adapter (fp32 CUDA tensors, as `lora_plan` checked)."""
     if not (CAST_CACHE and _hooks):
         if CAST_CACHE:
-            FELL_BACK["lora_cast"] += 1  # the copies are on but their invalidation hook is not
+            FELL_BACK["lora_cast"] += 1                                                        
         return lora_a.to(torch.float16), lora_b.to(torch.float16)
     return _half.get(lora_a), _half.get(lora_b)
 
@@ -166,7 +166,7 @@ class LoraProjectionTorch(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, x, x_base, lora_a, lora_b, group, idx, scaling, p):
-        # x and x_base are the same tensor: the adapter's and the base's input edges
+                                                                                    
         ctx.rng_state = None
         fetched = False
         try:
@@ -181,14 +181,14 @@ class LoraProjectionTorch(torch.autograd.Function):
             else:
                 xd = x2
             t = torch.mm(xd, a16.t())
-            del xd  # not kept: regenerated in the backward
+            del xd                                         
             branch = torch.mm(t, b16.t())
             if _power_of_two(scaling):
                 out.add_(branch, alpha=scaling)
             else:
                 out.add_(branch.mul_(scaling))
         except Exception:
-            # PEFT's fallback fetches the base weight and draws the dropout again
+                                                                                 
             if fetched:
                 group.refund("fwd")
             if ctx.rng_state is not None:
@@ -212,10 +212,10 @@ class LoraProjectionTorch(torch.autograd.Function):
             current = torch.cuda.get_rng_state(device)
             torch.cuda.set_rng_state(ctx.rng_state, device)
             try:
-                xd, mask = torch.native_dropout(x2, ctx.p, True)  # the forward's draw, replayed
-            finally:  # the generator goes back even if the replay fails (e.g. out of memory)
+                xd, mask = torch.native_dropout(x2, ctx.p, True)                                
+            finally:                                                                         
                 torch.cuda.set_rng_state(current, device)
-        g = dy * ctx.scaling  # the gradient of lora_B's output, as PEFT's `* scaling` gives it
+        g = dy * ctx.scaling                                                                   
         u = torch.mm(g, b16)
         dx_lora = dx_base = None
         if ctx.needs_input_grad[0]:
@@ -234,7 +234,7 @@ class LoraProjectionTorch(torch.autograd.Function):
 def _autocast_fp16():
     try:
         return torch.is_autocast_enabled("cuda") and torch.get_autocast_dtype("cuda") == torch.float16
-    except TypeError:  # older signature
+    except TypeError:                   
         return torch.is_autocast_enabled() and torch.get_autocast_gpu_dtype() == torch.float16
 
 
@@ -304,12 +304,12 @@ def patch_peft_lora():
             group, idx, lora_a, lora_b, scaling, p = plan
             try:
                 out = LoraProjectionTorch.apply(x, x, lora_a, lora_b, group, idx, scaling, p)
-            except Exception as exc:  # noqa: BLE001 - see state.py
+            except Exception as exc:                               
                 if not fallback("lora", exc):
                     raise
             else:
                 if torch.is_grad_enabled() and x.requires_grad:
-                    group.expected_bwd += 1  # the backward asks the layer group for the weight
+                    group.expected_bwd += 1                                                    
                 RAN["lora"] += 1
                 return out
         FELL_BACK["lora"] += 1

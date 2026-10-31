@@ -66,22 +66,22 @@ import triton.language as tl
 
 from .engaged import FELL_BACK, RAN
 
-BLOCK_V = 4096      # vocabulary slice per loop iteration
+BLOCK_V = 4096                                           
 NUM_WARPS = 8
-DEFAULT_CHUNK = 256  # tokens per logits chunk (token-chunked path): 256 x 151936 x 2 B = 74 MiB
-# Columns per vocabulary slice: 8192 x 1536 fp16 = 24 MiB of weight + [N, 8192] fp16 logits,
-# 19 slices for Qwen2.5's 151936 tokens.
+DEFAULT_CHUNK = 256                                                                             
+                                                                                            
+                                        
 VOCAB_CHUNK = int(os.environ.get("SOLUTION_HEAD_VCHUNK", "8192"))
-BLOCK_H = 512       # hidden-size slice of the accumulator rows
+BLOCK_H = 512                                                  
 VOCAB_PATH = os.environ.get("SOLUTION_DISABLE_HEAD_VCHUNK") != "1"
-# The hidden-gradient GEMM over the labelled rows only (see `labelled_first`).
+                                                                              
 COMPACT = os.environ.get("SOLUTION_DISABLE_HEAD_COMPACT") != "1"
-# Row sizes/strides passed to the vocabulary kernel in units of 8 elements, so its row loads and
-# stores vectorize (as RoPE's did: 3.75 -> 1.65 ms per step there); SOLUTION_DISABLE_HEAD_ROWS=1
-# passes element units as before. Not bit-identical: the vectorized layout changes the order of
-# the in-row fp32 reductions (last-bit differences, within the tests' tolerances). Measured on
-# the T4 (session t3a, per-kernel profiles of adjacent runs): this kernel 3.50 -> 2.35 and
-# 3.26 -> 2.37 ms per step; eval loss 2.0498 either way, peak memory unchanged.
+                                                                                                
+                                                                                                
+                                                                                               
+                                                                                              
+                                                                                          
+                                                                               
 ROW_UNIT = 1 if os.environ.get("SOLUTION_DISABLE_HEAD_ROWS") == "1" else 8
 
 
@@ -106,7 +106,7 @@ def fused_head_vocab_kernel(logits_ptr, targets_ptr, stats_ptr, best_idx_ptr, ac
     row = tl.program_id(0).to(tl.int64)
     target = tl.load(targets_ptr + row)
     labelled = target >= 0
-    sp = stats_ptr + row * 5  # running max m, sum s, entropy numerator t, best logit, z_target
+    sp = stats_ptr + row * 5                                                                   
     acc_row = acc_ptr + row * stride_acc
     if finalize != 0:
         s = tl.load(sp + 1)
@@ -115,11 +115,11 @@ def fused_head_vocab_kernel(logits_ptr, targets_ptr, stats_ptr, best_idx_ptr, ac
         for h in range(0, n_hidden, BLOCK_H):
             offs = h + tl.arange(0, BLOCK_H)
             hmask = offs < n_hidden
-            # unlabelled rows read nothing: with the labelled rows compacted (FusedHeadLossVocab)
-            # the accumulator has no row for them
+                                                                                                 
+                                                 
             lmask = hmask & labelled
             a = tl.load(acc_row + offs, mask=lmask, other=0.0)
-            # the fp16 value of W[target] the GEMMs used: its rounding cancels exactly
+                                                                                      
             w16 = tl.load(w_row + offs, mask=lmask, other=0.0).to(tl.float16).to(tl.float32)
             g = tl.where(labelled, a / s - w16, 0.0)
             tl.store(g_row + offs, g.to(grad_ptr.dtype.element_ty), mask=hmask)
@@ -161,14 +161,14 @@ def fused_head_vocab_kernel(logits_ptr, targets_ptr, stats_ptr, best_idx_ptr, ac
             ls = tl.log(s)
             lse = m + ls
             tl.store(entropy_ptr + row, lse - t / s)
-            # ls + (m - zt), not lse - zt: m and zt are fp16 logit values, so m - zt is exact in
-            # fp32 and a confident token keeps the low bits of log(s), as PyTorch's
-            # (z - max) - log(sum) does (lse - zt would round log(s) away against m ~ 25).
+                                                                                                
+                                                                                   
+                                                                                          
             tl.store(loss_ptr + row, tl.where(labelled, ls + (m - zt), 0.0))
             hit = best_idx.to(tl.int64) == target
             tl.store(correct_ptr + row, (labelled & hit).to(tl.int32))
         if labelled & (write_grad != 0):
-            if not_first & (m > m_old):  # earlier slices were weighted by exp(z - m_old)
+            if not_first & (m > m_old):                                                  
                 scale = tl.exp(m_old - m)
                 for h in range(0, n_hidden, BLOCK_H):
                     offs = h + tl.arange(0, BLOCK_H)
@@ -218,8 +218,8 @@ def fused_head_rows_kernel(logits_ptr, targets_ptr, loss_ptr, entropy_ptr, corre
     lse = m + ls
     tl.store(entropy_ptr + row, lse - t / s)
     z_target = tl.load(base + target, mask=labelled, other=0.0).to(tl.float32)
-    # ls + (m - z_target): exact difference of two fp16 logit values, so a confident token keeps
-    # the low bits of log(s) as PyTorch's (z - max) - log(sum) does.
+                                                                                                
+                                                                    
     tl.store(loss_ptr + row, tl.where(labelled, ls + (m - z_target), 0.0))
     hit = best_idx.to(tl.int64) == target
     tl.store(correct_ptr + row, (labelled & hit).to(tl.int32))
@@ -280,9 +280,9 @@ def _denominator(num_items, labelled_count):
 def _head_backward(ctx, grad_loss):
     (grad_hidden,) = ctx.saved_tensors
     scale = grad_loss.to(torch.float32) / ctx.denom
-    # num_items_in_batch = 0 (no labelled target in the batch): the base's loss is 0 / 0 = NaN
-    # but its gradient is exactly 0 (cross-entropy writes none on ignored rows), and here
-    # grad_hidden is all zeros; 0 * inf would be NaN. Same value whenever denom != 0, no sync.
+                                                                                              
+                                                                                         
+                                                                                              
     scale = torch.where(ctx.denom != 0, scale, 0.0)
     return (grad_hidden.to(torch.float32) * scale).to(ctx.out_dtype)
 
@@ -293,7 +293,7 @@ def labelled_first(labelled, n_labelled):
     and src the inverse (reordered row i is input row src[i])."""
     n = labelled.shape[0]
     pos = torch.arange(n, device=labelled.device)
-    seen = torch.cumsum(labelled, 0)  # labelled rows up to and including r (int64)
+    seen = torch.cumsum(labelled, 0)                                               
     dest = torch.where(labelled, seen - 1, pos - seen + n_labelled)
     src = torch.empty_like(dest).index_copy_(0, dest, pos)
     return dest, src
@@ -323,7 +323,7 @@ class FusedHeadLossVocab(torch.autograd.Function):
         vchunk = max(1, min(int(vocab_chunk), vocab))
         labelled = targets >= 0
 
-        # rows of the accumulator: all of them, or only the labelled ones put first
+                                                                                   
         n_grad, dest, rows_targets = n_tokens, None, targets
         if need_grad and COMPACT and n_tokens > 0:
             if n_labelled is None:
@@ -341,15 +341,15 @@ class FusedHeadLossVocab(torch.autograd.Function):
         stats = torch.empty(n_tokens, 5, dtype=torch.float32, device=device)
         best_idx = torch.empty(n_tokens, dtype=torch.int32, device=device)
         grad_hidden = torch.empty_like(h16) if need_grad else None
-        # (unused without labelled rows: one row, for the launch's row stride only)
+                                                                                   
         acc = torch.empty(n_grad if need_grad and n_grad > 0 else 1, hidden_size,
                           dtype=torch.float32, device=device)
         grad_arg = grad_hidden if need_grad else h16
         if n_tokens > 0:
             logits_buf = torch.empty(n_tokens * vchunk, dtype=torch.float16, device=device)
-            # An fp16 weight (the tied embedding as fp16_embed.py stores it): each slice of
-            # rows is a contiguous [cols, H] fp16 matrix already, the GEMM operand as it is.
-            # Otherwise (fp32): each slice cast into one reused fp16 buffer, the same values.
+                                                                                           
+                                                                                            
+                                                                                             
             sliced = weight.dtype == torch.float16 and weight.is_contiguous()
             w16_buf = None if sliced else torch.empty(vchunk * hidden_size, dtype=torch.float16,
                                                       device=device)
@@ -376,7 +376,7 @@ class FusedHeadLossVocab(torch.autograd.Function):
                     token_loss, token_entropy, correct, 0, 0, 0, hidden_size, True, False, False,
                     True))
         del acc, stats, best_idx, h16
-        if dest is not None:  # back to the input order
+        if dest is not None:                           
             token_loss = token_loss.index_select(0, dest)
             token_entropy = token_entropy.index_select(0, dest)
             correct = correct.index_select(0, dest)
@@ -406,7 +406,7 @@ class FusedHeadLoss(torch.autograd.Function):
         n_tokens, hidden_size = hidden.shape
         vocab = weight.shape[0]
         h16 = hidden.detach().to(torch.float16).contiguous()
-        w16 = weight.detach().to(torch.float16)  # the weight itself when it is stored in fp16
+        w16 = weight.detach().to(torch.float16)                                               
         targets = targets.contiguous()
 
         token_loss = torch.empty(n_tokens, dtype=torch.float32, device=hidden.device)
@@ -425,8 +425,8 @@ class FusedHeadLoss(torch.autograd.Function):
                         token_entropy[start:end], correct[start:end], need_grad)
             if need_grad:
                 torch.mm(logits, w16, out=grad_hidden[start:end])
-                # Unlabelled rows still hold logits, not gradients, and their product with W
-                # may even overflow fp16: replace those rows (not multiply) with 0.
+                                                                                            
+                                                                                   
                 grad_hidden[start:end].masked_fill_(~labelled[start:end, None], 0)
 
         denom = _denominator(num_items, labelled.sum())
@@ -457,6 +457,6 @@ def fused_head_loss(hidden, weight, targets, num_items=None, vocab_chunk=None, *
         return FusedHeadLossVocab.apply(hidden, weight, targets, num_items,
                                         vocab_chunk or VOCAB_CHUNK, need_grad, n_labelled)
     if VOCAB_PATH:
-        FELL_BACK["vchunk"] += 1  # the token-chunked head although the vocabulary path is on
+        FELL_BACK["vchunk"] += 1                                                             
     return FusedHeadLoss.apply(hidden, weight, targets, num_items, token_chunk or DEFAULT_CHUNK,
                                need_grad)
